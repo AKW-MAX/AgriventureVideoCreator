@@ -3,13 +3,13 @@ import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
-  Alert,
-  Image,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+    Alert,
+    Image,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from 'react-native';
 
 const characters = [
@@ -76,11 +76,13 @@ export default function CharactersScreen() {
     description,
     selectedCharacters: selectedCharactersParam,
     characterPhotos: characterPhotosParam,
+    characterVoices: characterVoicesParam,
   } = useLocalSearchParams<{
     title?: string;
     description?: string;
     selectedCharacters?: string;
     characterPhotos?: string;
+    characterVoices?: string;
   }>();
 
   // ==========================================
@@ -1194,6 +1196,10 @@ Return one finished character image.
           JSON.stringify(
             characterPhotos
           ),
+
+        characterVoices:
+          characterVoicesParam ||
+          JSON.stringify({}),
       },
     });
   };

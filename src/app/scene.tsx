@@ -1,15 +1,18 @@
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import * as Sharing from 'expo-sharing';
 import { useRef, useState } from 'react';
 import {
-  Alert,
-  Image,
-  PanResponder,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+    Alert,
+    Image,
+    Linking,
+    PanResponder,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from 'react-native';
 
 // ==========================================
@@ -23,6 +26,9 @@ type CharacterPosition = {
 };
 
 type CharacterPhotos = Record<string, string>;
+type CharacterVoices = Record<string, string>;
+
+const BACKEND_URL = 'http://10.159.131.218:5001';
 
 // ==========================================
 // CHARACTER EMOJIS
@@ -124,6 +130,40 @@ function safeParseObject(value: string): CharacterPhotos {
 
     return {};
   }
+}
+
+async function getImageInput(photoUri: string) {
+  if (photoUri.startsWith('http')) {
+    return {
+      imageUrl: photoUri,
+    };
+  }
+
+  if (photoUri.startsWith('data:')) {
+    const commaIndex = photoUri.indexOf(',');
+
+    return {
+      imageBase64:
+        commaIndex === -1
+          ? photoUri
+          : photoUri.slice(commaIndex + 1),
+      mimeType:
+        photoUri.match(/^data:([^;]+);/i)?.[1] ||
+        'image/jpeg',
+    };
+  }
+
+  return {
+    imageBase64:
+      await FileSystem.readAsStringAsync(
+        photoUri,
+        {
+          encoding:
+            FileSystem.EncodingType.Base64,
+        }
+      ),
+    mimeType: 'image/jpeg',
+  };
 }
 
 // ==========================================
@@ -312,6 +352,7 @@ export default function SceneScreen() {
     description?: string | string[];
     selectedCharacters?: string | string[];
     characterPhotos?: string | string[];
+    characterVoices?: string | string[];
     dialogue?: string | string[];
     dialogueCharacter?: string | string[];
   }>();
@@ -329,6 +370,11 @@ export default function SceneScreen() {
   const characterPhotosParam =
     getParamString(
       params.characterPhotos
+    );
+
+  const characterVoicesParam =
+    getParamString(
+      params.characterVoices
     );
 
   const dialogue =
@@ -357,6 +403,13 @@ export default function SceneScreen() {
         )
       : {};
 
+  const initialVoices =
+    characterVoicesParam
+      ? safeParseObject(
+          characterVoicesParam
+        )
+      : {};
+
   // ==========================================
   // STATE
   // ==========================================
@@ -374,6 +427,11 @@ export default function SceneScreen() {
       initialPhotos
     );
 
+  const [characterVoices, setCharacterVoices] =
+    useState<CharacterVoices>(
+      initialVoices
+    );
+
   const [savedDialogue, setSavedDialogue] =
     useState(dialogue);
 
@@ -386,6 +444,15 @@ export default function SceneScreen() {
         initialCharacters
       )
     );
+
+  const [generatingVideo, setGeneratingVideo] =
+    useState(false);
+
+  const [generatedVideoUrl, setGeneratedVideoUrl] =
+    useState<string | null>(null);
+
+  const [downloadingVideo, setDownloadingVideo] =
+    useState(false);
 
   // ==========================================
   // CHOOSE REAL FARM BACKGROUND
@@ -455,6 +522,11 @@ export default function SceneScreen() {
           JSON.stringify(
             characterPhotos
           ),
+
+        characterVoices:
+          JSON.stringify(
+            characterVoices
+          ),
       },
     });
   };
@@ -479,6 +551,11 @@ export default function SceneScreen() {
         characterPhotos:
           JSON.stringify(
             characterPhotos
+          ),
+
+        characterVoices:
+          JSON.stringify(
+            characterVoices
           ),
 
         dialogue:
@@ -593,7 +670,7 @@ export default function SceneScreen() {
   // PREPARE SCENE
   // ==========================================
 
-  const generateScene = () => {
+  const generateScene = async () => {
     if (!backgroundImage) {
       Alert.alert(
         'Background required',
@@ -614,10 +691,180 @@ export default function SceneScreen() {
       return;
     }
 
-    Alert.alert(
-      'Scene Ready',
-      'Your scene is ready for the next video-generation step.'
-    );
+    if (!savedDialogue.trim()) {
+      Alert.alert(
+        'Dialogue required',
+        'Add dialogue before generating a HeyGen video.'
+      );
+
+      return;
+    }
+
+    const characterName =
+      savedDialogueCharacter ||
+      selectedCharacters[0];
+
+    const characterPhoto =
+      characterPhotos[characterName] ||
+      characterPhotos[selectedCharacters[0]];
+
+    if (!characterPhoto) {
+      Alert.alert(
+        'Character photo required',
+        'Choose a character photo before generating a HeyGen video.'
+      );
+
+      return;
+    }
+
+    try {
+      setGeneratingVideo(true);
+      setGeneratedVideoUrl(null);
+
+      const imageInput =
+        await getImageInput(characterPhoto);
+
+      const backgroundInput =
+        await getImageInput(backgroundImage);
+
+      const createResponse = await fetch(
+        `${BACKEND_URL}/api/video/heygen/create`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            ...imageInput,
+            title: title || 'Agriventure Scene',
+            script: savedDialogue,
+            voiceId:
+              characterVoices[characterName],
+            aspectRatio: '9:16',
+            backgroundImageBase64:
+              backgroundInput.imageBase64,
+          }),
+        }
+      );
+
+      const createData =
+        await createResponse.json();
+
+      if (!createResponse.ok || !createData.success) {
+        throw new Error(
+          createData.error?.message ||
+          createData.message ||
+          'HeyGen video creation failed.'
+        );
+      }
+
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        await new Promise(resolve =>
+          setTimeout(resolve, 5000)
+        );
+
+        const statusResponse = await fetch(
+          `${BACKEND_URL}/api/video/heygen/status/${createData.videoId}`
+        );
+
+        const statusData =
+          await statusResponse.json();
+
+        if (
+          statusData.status === 'completed' &&
+          statusData.videoUrl
+        ) {
+          setGeneratedVideoUrl(
+            statusData.videoUrl
+          );
+
+          Alert.alert(
+            'HeyGen video ready',
+            'Your generated farming video is ready to open.'
+          );
+
+          return;
+        }
+
+        if (
+          statusData.status === 'failed' ||
+          statusData.status === 'error'
+        ) {
+          throw new Error(
+            statusData.error ||
+            'HeyGen could not generate the video.'
+          );
+        }
+      }
+
+      throw new Error(
+        'HeyGen is still processing the video. Check again shortly.'
+      );
+    } catch (error) {
+      Alert.alert(
+        'HeyGen error',
+        error instanceof Error
+          ? error.message
+          : 'Could not generate the HeyGen video.'
+      );
+    } finally {
+      setGeneratingVideo(false);
+    }
+  };
+
+  const downloadGeneratedVideo = async () => {
+    if (!generatedVideoUrl) {
+      return;
+    }
+
+    try {
+      setDownloadingVideo(true);
+
+      const targetUri =
+        `${FileSystem.documentDirectory || ''}agriventure-${Date.now()}.mp4`;
+
+      const download =
+        await FileSystem.downloadAsync(
+          generatedVideoUrl,
+          targetUri
+        );
+
+      if (!download.uri) {
+        throw new Error(
+          'The video could not be downloaded.'
+        );
+      }
+
+      if (
+        !(await Sharing.isAvailableAsync())
+      ) {
+        Alert.alert(
+          'Video downloaded',
+          `The video was saved to ${download.uri}`
+        );
+
+        return;
+      }
+
+      await Sharing.shareAsync(
+        download.uri,
+        {
+          mimeType: 'video/mp4',
+          dialogTitle:
+            'Save or share Agriventure video',
+          UTI: 'public.mpeg-4',
+        }
+      );
+    } catch (error) {
+      Alert.alert(
+        'Download failed',
+        error instanceof Error
+          ? error.message
+          : 'Could not download the generated video.'
+      );
+    } finally {
+      setDownloadingVideo(false);
+    }
   };
 
   // ==========================================
@@ -918,20 +1165,64 @@ export default function SceneScreen() {
 
       <Pressable
         style={
-          styles.generateButton
+          [
+            styles.generateButton,
+            generatingVideo &&
+              styles.generateButtonDisabled,
+          ]
         }
         onPress={
           generateScene
         }
+        disabled={generatingVideo}
       >
         <Text
           style={
             styles.generateButtonText
           }
         >
-          🎬 Prepare Scene
+          {generatingVideo
+            ? '⏳ Generating HeyGen Video...'
+            : '🎬 Generate with HeyGen'}
         </Text>
       </Pressable>
+
+      {generatedVideoUrl ? (
+        <View style={styles.generatedVideoBox}>
+          <Text style={styles.generatedVideoTitle}>
+            HeyGen video ready
+          </Text>
+
+          <Pressable
+            style={styles.openVideoButton}
+            onPress={() =>
+              Linking.openURL(
+                generatedVideoUrl
+              )
+            }
+          >
+            <Text style={styles.openVideoButtonText}>
+              Open Generated Video
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={[
+              styles.downloadVideoButton,
+              downloadingVideo &&
+                styles.downloadVideoButtonDisabled,
+            ]}
+            onPress={downloadGeneratedVideo}
+            disabled={downloadingVideo}
+          >
+            <Text style={styles.downloadVideoButtonText}>
+              {downloadingVideo
+                ? 'Downloading Video...'
+                : 'Download Video'}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
 
     </ScrollView>
   );
@@ -1235,6 +1526,53 @@ const styles = StyleSheet.create({
   generateButtonText: {
     color: 'white',
     fontSize: 17,
+    fontWeight: 'bold',
+  },
+
+  generateButtonDisabled: {
+    opacity: 0.6,
+  },
+
+  generatedVideoBox: {
+    marginTop: 16,
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: '#e8f5e9',
+  },
+
+  generatedVideoTitle: {
+    marginBottom: 10,
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1b5e20',
+  },
+
+  openVideoButton: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#2e7d32',
+  },
+
+  openVideoButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+
+  downloadVideoButton: {
+    alignItems: 'center',
+    marginTop: 10,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#1565c0',
+  },
+
+  downloadVideoButtonDisabled: {
+    opacity: 0.6,
+  },
+
+  downloadVideoButtonText: {
+    color: 'white',
     fontWeight: 'bold',
   },
 

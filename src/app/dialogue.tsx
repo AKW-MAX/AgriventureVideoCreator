@@ -1,5 +1,13 @@
+import {
+    AudioModule,
+    RecordingPresets,
+    setAudioModeAsync,
+    useAudioRecorder,
+    useAudioRecorderState,
+} from 'expo-audio';
+import * as FileSystem from 'expo-file-system/legacy';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
     Alert,
     Pressable,
@@ -15,6 +23,17 @@ import {
 // ==========================================
 
 type CharacterPhotos = Record<string, string>;
+type CharacterVoices = Record<string, string>;
+
+type HeyGenVoice = {
+  voice_id: string;
+  name: string;
+  language: string;
+  gender: string;
+  type: 'public' | 'private';
+};
+
+const BACKEND_URL = 'http://10.159.131.218:5001';
 
 // ==========================================
 // SAFE PARAMETER HELPER
@@ -80,6 +99,11 @@ const safeParseObject = (
   }
 };
 
+const safeParseVoices = (
+  value: string
+): CharacterVoices =>
+  safeParseObject(value);
+
 // ==========================================
 // DIALOGUE SCREEN
 // ==========================================
@@ -96,6 +120,7 @@ export default function DialogueScreen() {
     description?: string | string[];
     selectedCharacters?: string | string[];
     characterPhotos?: string | string[];
+    characterVoices?: string | string[];
     dialogue?: string | string[];
     dialogueCharacter?: string | string[];
   }>();
@@ -116,6 +141,11 @@ export default function DialogueScreen() {
   const characterPhotosParam =
     getParamString(
       params.characterPhotos
+    );
+
+  const characterVoicesParam =
+    getParamString(
+      params.characterVoices
     );
 
   const existingDialogue =
@@ -148,6 +178,13 @@ export default function DialogueScreen() {
         )
       : {};
 
+  const initialCharacterVoices =
+    characterVoicesParam
+      ? safeParseVoices(
+          characterVoicesParam
+        )
+      : {};
+
   // ==========================================
   // STATE
   // ==========================================
@@ -161,6 +198,225 @@ export default function DialogueScreen() {
 
   const [dialogue, setDialogue] =
     useState(existingDialogue);
+
+  const [characterVoices, setCharacterVoices] =
+    useState<CharacterVoices>(
+      initialCharacterVoices
+    );
+
+  const [voices, setVoices] =
+    useState<HeyGenVoice[]>([]);
+
+  const [voiceLoading, setVoiceLoading] =
+    useState(false);
+
+  const [voiceError, setVoiceError] =
+    useState('');
+
+  const [cloningVoice, setCloningVoice] =
+    useState(false);
+
+  const audioRecorder = useAudioRecorder(
+    RecordingPresets.HIGH_QUALITY
+  );
+
+  const recorderState = useAudioRecorderState(
+    audioRecorder
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    const loadVoices = async () => {
+      try {
+        setVoiceLoading(true);
+
+        const response = await fetch(
+          `${BACKEND_URL}/api/video/heygen/voices`
+        );
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          throw new Error(
+            data.error?.message ||
+            data.message ||
+            'Could not load voices.'
+          );
+        }
+
+        if (active) {
+          setVoices(data.voices || []);
+        }
+      } catch (error) {
+        if (active) {
+          setVoiceError(
+            error instanceof Error
+              ? error.message
+              : 'Could not load HeyGen voices.'
+          );
+        }
+      } finally {
+        if (active) {
+          setVoiceLoading(false);
+        }
+      }
+    };
+
+    loadVoices();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const selectVoice = (voiceId: string) => {
+    if (!selectedCharacter) {
+      return;
+    }
+
+    setCharacterVoices(current => ({
+      ...current,
+      [selectedCharacter]: voiceId,
+    }));
+  };
+
+  const cloneVoice = async () => {
+    if (!selectedCharacter) {
+      return;
+    }
+
+    try {
+      if (!recorderState.isRecording) {
+        const permission =
+          await AudioModule.requestRecordingPermissionsAsync();
+
+        if (!permission.granted) {
+          Alert.alert(
+            'Microphone permission required',
+            'Allow microphone access to record a character voice.'
+          );
+
+          return;
+        }
+
+        await setAudioModeAsync({
+          allowsRecording: true,
+          playsInSilentMode: true,
+        });
+
+        await audioRecorder.prepareToRecordAsync();
+        audioRecorder.record();
+        return;
+      }
+
+      await audioRecorder.stop();
+
+      if (!audioRecorder.uri) {
+        throw new Error('No voice recording was created.');
+      }
+
+      setCloningVoice(true);
+
+      const audioBase64 =
+        await FileSystem.readAsStringAsync(
+          audioRecorder.uri,
+          {
+            encoding:
+              FileSystem.EncodingType.Base64,
+          }
+        );
+
+      const response = await fetch(
+        `${BACKEND_URL}/api/video/heygen/clone-voice`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            audioBase64,
+            audioMimeType:
+              'application/octet-stream',
+            name: `${selectedCharacter} voice`,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (
+        !response.ok ||
+        !data.success ||
+        !data.voiceCloneId
+      ) {
+        throw new Error(
+          data.error?.message ||
+          data.message ||
+          'Voice cloning failed.'
+        );
+      }
+
+      let clonedVoiceId = '';
+
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        await new Promise(resolve =>
+          setTimeout(resolve, 3000)
+        );
+
+        const statusResponse = await fetch(
+          `${BACKEND_URL}/api/video/heygen/clone-voice/${data.voiceCloneId}`
+        );
+
+        const statusData =
+          await statusResponse.json();
+
+        if (!statusResponse.ok || !statusData.success) {
+          throw new Error(
+            statusData.error?.message ||
+            statusData.message ||
+            'Could not check voice clone status.'
+          );
+        }
+
+        if (
+          statusData.status === 'complete' &&
+          statusData.voiceId
+        ) {
+          clonedVoiceId = statusData.voiceId;
+          break;
+        }
+
+        if (statusData.status === 'failed') {
+          throw new Error(
+            statusData.error ||
+            'HeyGen could not complete the voice clone.'
+          );
+        }
+      }
+
+      if (!clonedVoiceId) {
+        throw new Error(
+          'Voice cloning is still processing. Please try again shortly.'
+        );
+      }
+
+      selectVoice(clonedVoiceId);
+
+      Alert.alert(
+        'Voice cloned',
+        `The cloned voice is assigned to ${selectedCharacter}.`
+      );
+    } catch (error) {
+      Alert.alert(
+        'Voice cloning error',
+        error instanceof Error
+          ? error.message
+          : 'Could not clone the voice.'
+      );
+    } finally {
+      setCloningVoice(false);
+    }
+  };
 
   // ==========================================
   // SAVE
@@ -198,6 +454,11 @@ export default function DialogueScreen() {
         characterPhotos:
           JSON.stringify(
             characterPhotos
+          ),
+
+        characterVoices:
+          JSON.stringify(
+            characterVoices
           ),
 
         dialogue:
@@ -343,6 +604,64 @@ export default function DialogueScreen() {
       <Text style={styles.characterCounter}>
         {dialogue.length}/500
       </Text>
+
+      <Text style={styles.label}>
+        Character Voice
+      </Text>
+
+      <Text style={styles.voiceHint}>
+        Choose an AI voice or record this character's voice to create a clone.
+      </Text>
+
+      {voiceLoading ? (
+        <Text style={styles.voiceStatus}>
+          Loading HeyGen voices...
+        </Text>
+      ) : null}
+
+      {voiceError ? (
+        <Text style={styles.voiceError}>
+          {voiceError}
+        </Text>
+      ) : null}
+
+      <View style={styles.voiceList}>
+        {voices.slice(0, 24).map(voice => (
+          <Pressable
+            key={voice.voice_id}
+            style={[
+              styles.voiceButton,
+              characterVoices[selectedCharacter] ===
+                voice.voice_id &&
+                styles.voiceButtonSelected,
+            ]}
+            onPress={() =>
+              selectVoice(voice.voice_id)
+            }
+          >
+            <Text style={styles.voiceName}>
+              {voice.name.trim()}
+            </Text>
+            <Text style={styles.voiceMeta}>
+              {voice.language} · {voice.gender}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
+      <Pressable
+        style={styles.cloneButton}
+        onPress={cloneVoice}
+        disabled={cloningVoice}
+      >
+        <Text style={styles.cloneButtonText}>
+          {recorderState.isRecording
+            ? '⏹ Stop and Clone Recording'
+            : cloningVoice
+              ? '⏳ Cloning Voice...'
+              : '🎙 Record and Clone Voice'}
+        </Text>
+      </Pressable>
 
       {/* ======================================
           PREVIEW
@@ -536,6 +855,67 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#777',
     marginTop: 5,
+  },
+
+  voiceHint: {
+    marginBottom: 10,
+    color: '#555',
+    fontSize: 13,
+    lineHeight: 19,
+  },
+
+  voiceStatus: {
+    marginBottom: 10,
+    color: '#555',
+    fontSize: 13,
+  },
+
+  voiceError: {
+    marginBottom: 10,
+    color: '#b3261e',
+    fontSize: 13,
+  },
+
+  voiceList: {
+    gap: 8,
+    marginBottom: 12,
+  },
+
+  voiceButton: {
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#dddddd',
+    borderRadius: 10,
+    backgroundColor: '#ffffff',
+  },
+
+  voiceButtonSelected: {
+    borderColor: '#2e7d32',
+    backgroundColor: '#e8f5e9',
+  },
+
+  voiceName: {
+    fontSize: 15,
+    fontWeight: 'bold',
+  },
+
+  voiceMeta: {
+    marginTop: 3,
+    color: '#666',
+    fontSize: 12,
+  },
+
+  cloneButton: {
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderRadius: 10,
+    backgroundColor: '#6a4bbc',
+  },
+
+  cloneButtonText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: 'bold',
   },
 
   // ========================================
