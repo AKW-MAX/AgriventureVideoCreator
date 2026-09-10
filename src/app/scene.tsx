@@ -4,15 +4,15 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useRef, useState } from 'react';
 import {
-    Alert,
-    Image,
-    Linking,
-    PanResponder,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  Alert,
+  Image,
+  Linking,
+  PanResponder,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 
 // ==========================================
@@ -27,6 +27,24 @@ type CharacterPosition = {
 
 type CharacterPhotos = Record<string, string>;
 type CharacterVoices = Record<string, string>;
+
+type GenerationStage =
+  | 'idle'
+  | 'background'
+  | 'character'
+  | 'composing';
+
+type ImageInput = {
+  imageBase64?: string;
+  imageUrl?: string;
+  mimeType?: string;
+};
+
+type BackgroundMode = 'photo' | 'video';
+
+// ==========================================
+// BACKEND
+// ==========================================
 
 const BACKEND_URL = 'http://10.159.131.218:5001';
 
@@ -109,7 +127,9 @@ function safeParseArray(value: string): string[] {
   }
 }
 
-function safeParseObject(value: string): CharacterPhotos {
+function safeParseObject(
+  value: string
+): CharacterPhotos {
   try {
     const parsed = JSON.parse(value);
 
@@ -124,7 +144,7 @@ function safeParseObject(value: string): CharacterPhotos {
     return {};
   } catch (error) {
     console.warn(
-      'Could not parse characterPhotos:',
+      'Could not parse character data:',
       error
     );
 
@@ -132,36 +152,107 @@ function safeParseObject(value: string): CharacterPhotos {
   }
 }
 
-async function getImageInput(photoUri: string) {
-  if (photoUri.startsWith('http')) {
+// ==========================================
+// SAFE BACKEND URL HELPER
+// ==========================================
+
+function makeBackendUrl(
+  value: unknown
+): string | null {
+  if (
+    typeof value !== 'string' ||
+    !value.trim()
+  ) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+
+  // Already a complete URL
+  if (
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('https://')
+  ) {
+    return trimmed;
+  }
+
+  // Backend returned a relative path
+  if (trimmed.startsWith('/')) {
+    return `${BACKEND_URL}${trimmed}`;
+  }
+
+  // Backend returned only a filename
+  return `${BACKEND_URL}/api/video/files/${encodeURIComponent(
+    trimmed
+  )}`;
+}
+
+// ==========================================
+// IMAGE INPUT HELPER
+// ==========================================
+
+async function getImageInput(
+  photoUri: string
+): Promise<ImageInput> {
+  if (!photoUri) {
+    throw new Error(
+      'No image was selected.'
+    );
+  }
+
+  // ------------------------------------------
+  // Remote image
+  // ------------------------------------------
+
+  if (
+    photoUri.startsWith('http://') ||
+    photoUri.startsWith('https://')
+  ) {
     return {
       imageUrl: photoUri,
+      mimeType: 'image/jpeg',
     };
   }
 
+  // ------------------------------------------
+  // Data URI
+  // ------------------------------------------
+
   if (photoUri.startsWith('data:')) {
-    const commaIndex = photoUri.indexOf(',');
+    const commaIndex =
+      photoUri.indexOf(',');
+
+    const mimeType =
+      photoUri.match(
+        /^data:([^;]+);/i
+      )?.[1] || 'image/jpeg';
 
     return {
       imageBase64:
         commaIndex === -1
           ? photoUri
-          : photoUri.slice(commaIndex + 1),
-      mimeType:
-        photoUri.match(/^data:([^;]+);/i)?.[1] ||
-        'image/jpeg',
+          : photoUri.slice(
+              commaIndex + 1
+            ),
+      mimeType,
     };
   }
 
+  // ------------------------------------------
+  // Local Expo file
+  // ------------------------------------------
+
+  const base64 =
+    await FileSystem.readAsStringAsync(
+      photoUri,
+      {
+        encoding:
+          FileSystem.EncodingType.Base64,
+      }
+    );
+
   return {
-    imageBase64:
-      await FileSystem.readAsStringAsync(
-        photoUri,
-        {
-          encoding:
-            FileSystem.EncodingType.Base64,
-        }
-      ),
+    imageBase64: base64,
     mimeType: 'image/jpeg',
   };
 }
@@ -199,34 +290,51 @@ function DraggableCharacter({
   onDelete: () => void;
   onResize: (size: number) => void;
 }) {
-  const startPosition = useRef<CharacterPosition>(position);
+  const startPosition =
+    useRef<CharacterPosition>(position);
 
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponder:
+        () => true,
 
       onPanResponderGrant: () => {
-        startPosition.current = position;
+        startPosition.current = {
+          ...position,
+        };
       },
 
-      onPanResponderMove: (_, gesture) => {
+      onPanResponderMove: (
+        _,
+        gesture
+      ) => {
         onMove(
-          startPosition.current.x + gesture.dx,
-          startPosition.current.y + gesture.dy
+          startPosition.current.x +
+            gesture.dx,
+          startPosition.current.y +
+            gesture.dy
         );
       },
 
-      onPanResponderRelease: (_, gesture) => {
+      onPanResponderRelease: (
+        _,
+        gesture
+      ) => {
         onMove(
-          startPosition.current.x + gesture.dx,
-          startPosition.current.y + gesture.dy
+          startPosition.current.x +
+            gesture.dx,
+          startPosition.current.y +
+            gesture.dy
         );
       },
     })
   ).current;
 
-  const imageWidth = position.size;
-  const imageHeight = position.size * 1.25;
+  const imageWidth =
+    position.size;
+
+  const imageHeight =
+    position.size * 1.25;
 
   return (
     <View
@@ -239,10 +347,6 @@ function DraggableCharacter({
         },
       ]}
     >
-      {/* ======================================
-          CHARACTER
-      ====================================== */}
-
       {characterPhoto ? (
         <Image
           source={{
@@ -259,32 +363,32 @@ function DraggableCharacter({
           style={[
             styles.characterEmoji,
             {
-              fontSize: position.size * 0.6,
+              fontSize:
+                position.size * 0.6,
             },
           ]}
         >
-          {getCharacterEmoji(character)}
+          {getCharacterEmoji(
+            character
+          )}
         </Text>
       )}
 
-      {/* ======================================
-          EDITOR LABEL
-      ====================================== */}
-
-      <Text style={styles.characterName}>
+      <Text
+        style={styles.characterName}
+      >
         {character}
       </Text>
 
-      {/* ======================================
-          EDITOR CONTROLS
-      ====================================== */}
-
-      <View style={styles.characterControls}>
-
-        {/* SMALLER */}
-
+      <View
+        style={
+          styles.characterControls
+        }
+      >
         <Pressable
-          style={styles.controlButton}
+          style={
+            styles.controlButton
+          }
           onPress={() =>
             onResize(
               Math.max(
@@ -294,15 +398,19 @@ function DraggableCharacter({
             )
           }
         >
-          <Text style={styles.controlButtonText}>
+          <Text
+            style={
+              styles.controlButtonText
+            }
+          >
             −
           </Text>
         </Pressable>
 
-        {/* LARGER */}
-
         <Pressable
-          style={styles.controlButton}
+          style={
+            styles.controlButton
+          }
           onPress={() =>
             onResize(
               Math.min(
@@ -312,12 +420,14 @@ function DraggableCharacter({
             )
           }
         >
-          <Text style={styles.controlButtonText}>
+          <Text
+            style={
+              styles.controlButtonText
+            }
+          >
             +
           </Text>
         </Pressable>
-
-        {/* DELETE */}
 
         <Pressable
           style={[
@@ -326,11 +436,14 @@ function DraggableCharacter({
           ]}
           onPress={onDelete}
         >
-          <Text style={styles.controlButtonText}>
+          <Text
+            style={
+              styles.controlButtonText
+            }
+          >
             ✕
           </Text>
         </Pressable>
-
       </View>
     </View>
   );
@@ -347,20 +460,33 @@ export default function SceneScreen() {
   // ROUTE PARAMETERS
   // ==========================================
 
-  const params = useLocalSearchParams<{
-    title?: string | string[];
-    description?: string | string[];
-    selectedCharacters?: string | string[];
-    characterPhotos?: string | string[];
-    characterVoices?: string | string[];
-    dialogue?: string | string[];
-    dialogueCharacter?: string | string[];
-  }>();
+  const params =
+    useLocalSearchParams<{
+      title?: string | string[];
+      description?: string | string[];
+      selectedCharacters?:
+        | string
+        | string[];
+      characterPhotos?:
+        | string
+        | string[];
+      characterVoices?:
+        | string
+        | string[];
+      dialogue?: string | string[];
+      dialogueCharacter?:
+        | string
+        | string[];
+    }>();
 
-  const title = getParamString(params.title);
+  const title = getParamString(
+    params.title
+  );
 
   const description =
-    getParamString(params.description);
+    getParamString(
+      params.description
+    );
 
   const selectedCharactersParam =
     getParamString(
@@ -377,8 +503,9 @@ export default function SceneScreen() {
       params.characterVoices
     );
 
-  const dialogue =
-    getParamString(params.dialogue);
+  const dialogue = getParamString(
+    params.dialogue
+  );
 
   const dialogueCharacter =
     getParamString(
@@ -414,92 +541,177 @@ export default function SceneScreen() {
   // STATE
   // ==========================================
 
-  const [backgroundImage, setBackgroundImage] =
-    useState<string | null>(null);
+  const [
+    backgroundImage,
+    setBackgroundImage,
+  ] = useState<string | null>(
+    null
+  );
 
-  const [selectedCharacters, setSelectedCharacters] =
-    useState<string[]>(
+  const [
+    backgroundMode,
+    setBackgroundMode,
+  ] = useState<BackgroundMode>(
+    'photo'
+  );
+
+  const [
+    selectedCharacters,
+    setSelectedCharacters,
+  ] = useState<string[]>(
+    initialCharacters
+  );
+
+  const [
+    characterPhotos,
+    setCharacterPhotos,
+  ] = useState<CharacterPhotos>(
+    initialPhotos
+  );
+
+  const [
+    characterVoices,
+    setCharacterVoices,
+  ] = useState<CharacterVoices>(
+    initialVoices
+  );
+
+  const [
+    savedDialogue,
+    setSavedDialogue,
+  ] = useState(dialogue);
+
+  const [
+    savedDialogueCharacter,
+    setSavedDialogueCharacter,
+  ] = useState(
+    dialogueCharacter
+  );
+
+  const [
+    characterPositions,
+    setCharacterPositions,
+  ] = useState<CharacterPosition[]>(
+    createInitialPositions(
       initialCharacters
-    );
+    )
+  );
 
-  const [characterPhotos, setCharacterPhotos] =
-    useState<CharacterPhotos>(
-      initialPhotos
-    );
+  const [
+    generatingVideo,
+    setGeneratingVideo,
+  ] = useState(false);
 
-  const [characterVoices, setCharacterVoices] =
-    useState<CharacterVoices>(
-      initialVoices
-    );
+  const [
+    generationStage,
+    setGenerationStage,
+  ] = useState<GenerationStage>(
+    'idle'
+  );
 
-  const [savedDialogue, setSavedDialogue] =
-    useState(dialogue);
+  const [
+    generatedVideoUrl,
+    setGeneratedVideoUrl,
+  ] = useState<string | null>(
+    null
+  );
 
-  const [savedDialogueCharacter, setSavedDialogueCharacter] =
-    useState(dialogueCharacter);
-
-  const [characterPositions, setCharacterPositions] =
-    useState<CharacterPosition[]>(
-      createInitialPositions(
-        initialCharacters
-      )
-    );
-
-  const [generatingVideo, setGeneratingVideo] =
-    useState(false);
-
-  const [generatedVideoUrl, setGeneratedVideoUrl] =
-    useState<string | null>(null);
-
-  const [downloadingVideo, setDownloadingVideo] =
-    useState(false);
+  const [
+    downloadingVideo,
+    setDownloadingVideo,
+  ] = useState(false);
 
   // ==========================================
   // CHOOSE REAL FARM BACKGROUND
   // ==========================================
 
-  const chooseBackground = async () => {
-    try {
-      const permission =
-        await ImagePicker.requestMediaLibraryPermissionsAsync();
+  const chooseBackground =
+    async () => {
+      try {
+        const permission =
+          await ImagePicker.requestMediaLibraryPermissionsAsync();
 
-      if (!permission.granted) {
-        Alert.alert(
-          'Permission required',
-          'Please allow access to your photos.'
-        );
+        if (!permission.granted) {
+          Alert.alert(
+            'Permission required',
+            'Please allow access to your photos.'
+          );
+          return;
+        }
 
-        return;
-      }
+        const result =
+          await ImagePicker.launchImageLibraryAsync(
+            {
+              mediaTypes: ['images'],
+              allowsEditing: true,
+              aspect: [9, 16],
+              quality: 0.9,
+            }
+          );
 
-      const result =
-        await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ['images'],
-          allowsEditing: true,
-          aspect: [9, 16],
-          quality: 0.9,
-        });
+        if (
+          result.canceled ||
+          !result.assets ||
+          result.assets.length === 0
+        ) {
+          return;
+        }
 
-      if (
-        !result.canceled &&
-        result.assets.length > 0
-      ) {
+        const selectedUri =
+          result.assets[0].uri;
+
         setBackgroundImage(
-          result.assets[0].uri
+          selectedUri
+        );
+
+        Alert.alert(
+          'Farm Background',
+          'How would you like to use this farm photo?',
+          [
+            {
+              text: '📷 Use Photo As-Is',
+              onPress: () => {
+                setBackgroundMode(
+                  'photo'
+                );
+
+                console.log(
+                  '📷 Background mode: PHOTO'
+                );
+              },
+            },
+
+            {
+              text: '🎬 Animate with Gemini/Veo',
+              onPress: () => {
+                setBackgroundMode(
+                  'video'
+                );
+
+                console.log(
+                  '🎬 Background mode: GEMINI/VEO'
+                );
+              },
+            },
+
+            {
+              text: 'Cancel',
+              style: 'cancel',
+            },
+          ]
+        );
+      } catch (error) {
+        console.error(
+          'Background selection error:',
+          error
+        );
+
+        Alert.alert(
+          'Background Error',
+          'Could not select the background image.'
         );
       }
-    } catch (error) {
-      console.error(
-        'Background selection error:',
-        error
-      );
-
-      Alert.alert(
-        'Background Error',
-        'Could not select the background image.'
-      );
-    }
-  };
+    };
 
   // ==========================================
   // OPEN CHARACTERS
@@ -508,7 +720,6 @@ export default function SceneScreen() {
   const openCharacters = () => {
     router.push({
       pathname: '/characters',
-
       params: {
         title,
         description,
@@ -538,7 +749,6 @@ export default function SceneScreen() {
   const openDialogue = () => {
     router.push({
       pathname: '/dialogue',
-
       params: {
         title,
         description,
@@ -578,7 +788,9 @@ export default function SceneScreen() {
   ) => {
     setCharacterPositions(
       current => {
-        const updated = [...current];
+        const updated = [
+          ...current,
+        ];
 
         if (!updated[index]) {
           return current;
@@ -605,7 +817,9 @@ export default function SceneScreen() {
   ) => {
     setCharacterPositions(
       current => {
-        const updated = [...current];
+        const updated = [
+          ...current,
+        ];
 
         if (!updated[index]) {
           return current;
@@ -667,205 +881,1064 @@ export default function SceneScreen() {
   };
 
   // ==========================================
-  // PREPARE SCENE
+  // GENERATE VIDEO
   // ==========================================
 
-  const generateScene = async () => {
-    if (!backgroundImage) {
-      Alert.alert(
-        'Background required',
-        'Please choose a real farm background before preparing the scene.'
-      );
+  const generateScene =
+    async () => {
+      // ========================================
+      // VALIDATION
+      // ========================================
 
-      return;
-    }
-
-    if (
-      selectedCharacters.length === 0
-    ) {
-      Alert.alert(
-        'Character required',
-        'Please add at least one character to the scene.'
-      );
-
-      return;
-    }
-
-    if (!savedDialogue.trim()) {
-      Alert.alert(
-        'Dialogue required',
-        'Add dialogue before generating a HeyGen video.'
-      );
-
-      return;
-    }
-
-    const characterName =
-      savedDialogueCharacter ||
-      selectedCharacters[0];
-
-    const characterPhoto =
-      characterPhotos[characterName] ||
-      characterPhotos[selectedCharacters[0]];
-
-    if (!characterPhoto) {
-      Alert.alert(
-        'Character photo required',
-        'Choose a character photo before generating a HeyGen video.'
-      );
-
-      return;
-    }
-
-    try {
-      setGeneratingVideo(true);
-      setGeneratedVideoUrl(null);
-
-      const imageInput =
-        await getImageInput(characterPhoto);
-
-      const backgroundInput =
-        await getImageInput(backgroundImage);
-
-      const createResponse = await fetch(
-        `${BACKEND_URL}/api/video/heygen/create`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            ...imageInput,
-            title: title || 'Agriventure Scene',
-            script: savedDialogue,
-            voiceId:
-              characterVoices[characterName],
-            aspectRatio: '9:16',
-            backgroundImageBase64:
-              backgroundInput.imageBase64,
-          }),
-        }
-      );
-
-      const createData =
-        await createResponse.json();
-
-      if (!createResponse.ok || !createData.success) {
-        throw new Error(
-          createData.error?.message ||
-          createData.message ||
-          'HeyGen video creation failed.'
+      if (!backgroundImage) {
+        Alert.alert(
+          'Background required',
+          'Please choose a real farm background first.'
         );
-      }
-
-      for (let attempt = 0; attempt < 30; attempt += 1) {
-        await new Promise(resolve =>
-          setTimeout(resolve, 5000)
-        );
-
-        const statusResponse = await fetch(
-          `${BACKEND_URL}/api/video/heygen/status/${createData.videoId}`
-        );
-
-        const statusData =
-          await statusResponse.json();
-
-        if (
-          statusData.status === 'completed' &&
-          statusData.videoUrl
-        ) {
-          setGeneratedVideoUrl(
-            statusData.videoUrl
-          );
-
-          Alert.alert(
-            'HeyGen video ready',
-            'Your generated farming video is ready to open.'
-          );
-
-          return;
-        }
-
-        if (
-          statusData.status === 'failed' ||
-          statusData.status === 'error'
-        ) {
-          throw new Error(
-            statusData.error ||
-            'HeyGen could not generate the video.'
-          );
-        }
-      }
-
-      throw new Error(
-        'HeyGen is still processing the video. Check again shortly.'
-      );
-    } catch (error) {
-      Alert.alert(
-        'HeyGen error',
-        error instanceof Error
-          ? error.message
-          : 'Could not generate the HeyGen video.'
-      );
-    } finally {
-      setGeneratingVideo(false);
-    }
-  };
-
-  const downloadGeneratedVideo = async () => {
-    if (!generatedVideoUrl) {
-      return;
-    }
-
-    try {
-      setDownloadingVideo(true);
-
-      const targetUri =
-        `${FileSystem.documentDirectory || ''}agriventure-${Date.now()}.mp4`;
-
-      const download =
-        await FileSystem.downloadAsync(
-          generatedVideoUrl,
-          targetUri
-        );
-
-      if (!download.uri) {
-        throw new Error(
-          'The video could not be downloaded.'
-        );
+        return;
       }
 
       if (
-        !(await Sharing.isAvailableAsync())
+        selectedCharacters.length ===
+        0
       ) {
         Alert.alert(
-          'Video downloaded',
-          `The video was saved to ${download.uri}`
+          'Character required',
+          'Please add at least one character to the scene.'
+        );
+        return;
+      }
+
+      if (
+        !savedDialogue.trim()
+      ) {
+        Alert.alert(
+          'Dialogue required',
+          'Add dialogue before generating the video.'
+        );
+        return;
+      }
+
+      const characterName =
+        savedDialogueCharacter ||
+        selectedCharacters[0];
+
+      const characterPhoto =
+        characterPhotos[
+          characterName
+        ] ||
+        characterPhotos[
+          selectedCharacters[0]
+        ];
+
+      if (!characterPhoto) {
+        Alert.alert(
+          'Character photo required',
+          'Choose a character photo before generating the video.'
+        );
+        return;
+      }
+
+      const voiceId =
+        characterVoices[
+          characterName
+        ];
+
+      if (!voiceId) {
+        Alert.alert(
+          'Voice required',
+          `Please choose a voice for ${characterName} before generating the video.`
+        );
+        return;
+      }
+
+      try {
+        setGeneratingVideo(
+          true
+        );
+
+        setGeneratedVideoUrl(
+          null
+        );
+
+        // ========================================
+        // STEP 1
+        // PREPARE BACKGROUND
+        // ========================================
+
+        setGenerationStage(
+          'background'
+        );
+
+        console.log(
+          '======================================'
+        );
+
+        console.log(
+          '🌾 STEP 1: PREPARING FARM BACKGROUND'
+        );
+
+        console.log(
+          '======================================'
+        );
+
+        const backgroundInput =
+          await getImageInput(
+            backgroundImage
+          );
+
+        if (
+          !backgroundInput.imageBase64
+        ) {
+          throw new Error(
+            'The selected farm image could not be converted to base64.'
+          );
+        }
+
+        let backgroundFilename:
+          | string
+          | undefined;
+
+        // ========================================
+        // PHOTO MODE
+        // ========================================
+
+        if (
+          backgroundMode ===
+          'photo'
+        ) {
+          console.log(
+            '📷 Keeping farm photo as-is...'
+          );
+
+          const backgroundResponse =
+            await fetch(
+              `${BACKEND_URL}/api/video/background/photo`,
+              {
+                method: 'POST',
+
+                headers: {
+                  'Content-Type':
+                    'application/json',
+                },
+
+                body: JSON.stringify({
+                  backgroundImageBase64:
+                    backgroundInput.imageBase64,
+
+                  mimeType:
+                    backgroundInput.mimeType ||
+                    'image/jpeg',
+
+                  duration: 15,
+                }),
+              }
+            );
+
+          const backgroundText =
+            await backgroundResponse.text();
+
+          let backgroundData: any;
+
+          try {
+            backgroundData =
+              JSON.parse(
+                backgroundText
+              );
+          } catch {
+            throw new Error(
+              `Backend returned an invalid photo background response: ${backgroundText.slice(
+                0,
+                300
+              )}`
+            );
+          }
+
+          console.log(
+            'Photo background response:',
+            backgroundData
+          );
+
+          if (
+            !backgroundResponse.ok ||
+            !backgroundData.success
+          ) {
+            throw new Error(
+              backgroundData.message ||
+                backgroundData.error ||
+                `Photo background preparation failed (${backgroundResponse.status}).`
+            );
+          }
+
+          backgroundFilename =
+            backgroundData.filename ||
+            backgroundData.fileName;
+
+          if (
+            !backgroundFilename
+          ) {
+            throw new Error(
+              'Photo background was created but no filename was returned by the backend.'
+            );
+          }
+
+          console.log(
+            '✅ Static farm background:',
+            backgroundFilename
+          );
+        }
+
+        // ========================================
+        // GEMINI / VEO MODE
+        // ========================================
+
+        else {
+          console.log(
+            '🎬 Animating farm photo with Gemini/Veo...'
+          );
+
+          const backgroundResponse =
+            await fetch(
+              `${BACKEND_URL}/api/video/background/generate`,
+              {
+                method: 'POST',
+
+                headers: {
+                  'Content-Type':
+                    'application/json',
+                },
+
+                body: JSON.stringify({
+                  backgroundImageBase64:
+                    backgroundInput.imageBase64,
+
+                  mimeType:
+                    backgroundInput.mimeType ||
+                    'image/jpeg',
+                }),
+              }
+            );
+
+          const backgroundText =
+            await backgroundResponse.text();
+
+          let backgroundData: any;
+
+          try {
+            backgroundData =
+              JSON.parse(
+                backgroundText
+              );
+          } catch {
+            throw new Error(
+              `Backend returned an invalid Gemini background response: ${backgroundText.slice(
+                0,
+                300
+              )}`
+            );
+          }
+
+          console.log(
+            'Gemini background response:',
+            backgroundData
+          );
+
+          if (
+            backgroundResponse.status ===
+              429 ||
+            backgroundData.code ===
+              'GEMINI_QUOTA_EXCEEDED'
+          ) {
+            throw new Error(
+              'Gemini/Veo quota has been exceeded. Please choose "Use Photo As-Is" for this scene.'
+            );
+          }
+
+          if (
+            !backgroundResponse.ok ||
+            !backgroundData.success
+          ) {
+            throw new Error(
+              backgroundData.message ||
+                backgroundData.error ||
+                `Gemini background generation failed (${backgroundResponse.status}).`
+            );
+          }
+
+          backgroundFilename =
+            backgroundData.filename ||
+            backgroundData.fileName;
+
+          if (
+            !backgroundFilename
+          ) {
+            throw new Error(
+              'Gemini completed but no moving background filename was returned.'
+            );
+          }
+
+          console.log(
+            '✅ Moving Gemini background:',
+            backgroundFilename
+          );
+        }
+
+        // ========================================
+        // STEP 2
+        // HEYGEN CHARACTER
+        // ========================================
+
+        setGenerationStage(
+          'character'
+        );
+
+        console.log(
+          '======================================'
+        );
+
+        console.log(
+          '🎭 STEP 2: CREATING CHARACTER VIDEO'
+        );
+
+        console.log(
+          '======================================'
+        );
+
+        const characterInput =
+          await getImageInput(
+            characterPhoto
+          );
+
+        if (
+          !characterInput.imageBase64 &&
+          !characterInput.imageUrl
+        ) {
+          throw new Error(
+            'The character image could not be prepared.'
+          );
+        }
+
+        const createResponse =
+          await fetch(
+            `${BACKEND_URL}/api/video/heygen/create`,
+            {
+              method: 'POST',
+
+              headers: {
+                'Content-Type':
+                  'application/json',
+              },
+
+              body: JSON.stringify({
+                ...characterInput,
+
+                title:
+                  title ||
+                  'Agriventure Scene',
+
+                script:
+                  savedDialogue.trim(),
+
+                voiceId,
+
+                aspectRatio:
+                  '9:16',
+
+                resolution:
+                  '720p',
+              }),
+            }
+          );
+
+        const createText =
+          await createResponse.text();
+
+        let createData: any;
+
+        try {
+          createData =
+            JSON.parse(
+              createText
+            );
+        } catch {
+          throw new Error(
+            `Backend returned an invalid HeyGen response: ${createText.slice(
+              0,
+              300
+            )}`
+          );
+        }
+
+        console.log(
+          'HeyGen create response:',
+          createData
+        );
+
+        if (
+          !createResponse.ok ||
+          !createData.success
+        ) {
+          const heygenMessage =
+            createData.error?.message ||
+            createData.message ||
+            createData.error ||
+            'HeyGen video creation failed.';
+
+          throw new Error(
+            heygenMessage
+          );
+        }
+
+        const videoId =
+          createData.videoId ||
+          createData.video_id ||
+          createData.data?.video_id ||
+          createData.data?.videoId;
+
+        if (!videoId) {
+          throw new Error(
+            'HeyGen did not return a video ID.'
+          );
+        }
+
+        console.log(
+          '✅ HeyGen video ID:',
+          videoId
+        );
+
+        // ========================================
+        // STEP 3
+        // WAIT FOR HEYGEN
+        // ========================================
+
+        let characterFilename:
+          | string
+          | null = null;
+
+        let lastStatus =
+          'waiting';
+
+        for (
+          let attempt = 0;
+          attempt < 60;
+          attempt += 1
+        ) {
+          console.log(
+            `🎭 Checking HeyGen character ${attempt + 1}/60`
+          );
+
+          await new Promise(
+            resolve =>
+              setTimeout(
+                resolve,
+                5000
+              )
+          );
+
+          const characterResponse =
+            await fetch(
+              `${BACKEND_URL}/api/video/heygen/status/${encodeURIComponent(
+                videoId
+              )}`
+            );
+
+          const characterText =
+            await characterResponse.text();
+
+          let characterData: any;
+
+          try {
+            characterData =
+              JSON.parse(
+                characterText
+              );
+          } catch {
+            throw new Error(
+              `HeyGen status returned invalid data: ${characterText.slice(
+                0,
+                300
+              )}`
+            );
+          }
+
+          console.log(
+            'HeyGen status response:',
+            characterData
+          );
+
+          lastStatus =
+            characterData.status ||
+            characterData.data?.status ||
+            lastStatus;
+
+          // ======================================
+          // HEYGEN FAILED
+          // ======================================
+
+          if (
+            lastStatus === 'failed' ||
+            lastStatus === 'error'
+          ) {
+            const failureMessage =
+              characterData.failureMessage ||
+              characterData.failure_message ||
+              characterData.error?.message ||
+              characterData.error ||
+              characterData.message ||
+              characterData.data?.failure_message ||
+              'HeyGen could not generate the character video.';
+
+            throw new Error(
+              `HeyGen generation failed: ${failureMessage}`
+            );
+          }
+
+          // ======================================
+          // HEYGEN COMPLETED
+          // ======================================
+
+          if (
+            lastStatus ===
+              'completed' ||
+            characterData.completed ===
+              true
+          ) {
+            console.log(
+              '✅ HeyGen reports video completed.'
+            );
+
+            // ------------------------------------
+            // Get the generated HeyGen video
+            // and prepare it for FFmpeg.
+            // ------------------------------------
+
+            const characterFileResponse =
+              await fetch(
+                `${BACKEND_URL}/api/video/heygen/character/${encodeURIComponent(
+                  videoId
+                )}`
+              );
+
+            const characterFileText =
+              await characterFileResponse.text();
+
+            let characterFileData: any;
+
+            try {
+              characterFileData =
+                JSON.parse(
+                  characterFileText
+                );
+            } catch {
+              throw new Error(
+                `HeyGen character response was invalid: ${characterFileText.slice(
+                  0,
+                  300
+                )}`
+              );
+            }
+
+            console.log(
+              'HeyGen character file response:',
+              characterFileData
+            );
+
+            if (
+              !characterFileResponse.ok ||
+              !characterFileData.success
+            ) {
+              throw new Error(
+                characterFileData.message ||
+                  characterFileData.error ||
+                  'HeyGen video could not be prepared for composition.'
+              );
+            }
+
+            characterFilename =
+              characterFileData.filename ||
+              characterFileData.fileName;
+
+            if (
+              !characterFilename
+            ) {
+              throw new Error(
+                'HeyGen completed successfully, but the backend did not return a character filename.'
+              );
+            }
+
+            break;
+          }
+        }
+
+        // ========================================
+        // CHARACTER TIMEOUT
+        // ========================================
+
+        if (!characterFilename) {
+          throw new Error(
+            `HeyGen is still processing the character video (status: ${lastStatus}). Please try again shortly.`
+          );
+        }
+
+        console.log(
+          '✅ Character video file:',
+          characterFilename
+        );
+
+        // ========================================
+        // STEP 4
+        // FFMPEG COMPOSITION
+        // ========================================
+
+        setGenerationStage(
+          'composing'
+        );
+
+        console.log(
+          '======================================'
+        );
+
+        console.log(
+          '🎬 STEP 4: COMBINING VIDEOS'
+        );
+
+        console.log(
+          '======================================'
+        );
+
+        const composeResponse =
+          await fetch(
+            `${BACKEND_URL}/api/video/compose`,
+            {
+              method: 'POST',
+
+              headers: {
+                'Content-Type':
+                  'application/json',
+              },
+
+              body: JSON.stringify({
+                backgroundFilename,
+
+                characterFilename,
+
+                videoId,
+
+                title:
+                  title ||
+                  'Agriventure Scene',
+              }),
+            }
+          );
+
+        const composeText =
+          await composeResponse.text();
+
+        let composeData: any;
+
+        try {
+          composeData =
+            JSON.parse(
+              composeText
+            );
+        } catch {
+          throw new Error(
+            `Backend returned an invalid FFmpeg response: ${composeText.slice(
+              0,
+              300
+            )}`
+          );
+        }
+
+        console.log(
+          'FFmpeg compose response:',
+          composeData
+        );
+
+        if (
+          !composeResponse.ok ||
+          !composeData.success
+        ) {
+          throw new Error(
+            composeData.message ||
+              composeData.error ||
+              `FFmpeg composition failed (${composeResponse.status}).`
+          );
+        }
+
+        // ========================================
+        // GET FINAL VIDEO URL
+        // ========================================
+
+        const rawFinalVideo =
+          composeData.videoUrl ||
+          composeData.video_url ||
+          composeData.url ||
+          composeData.fileUrl ||
+          composeData.file_url ||
+          composeData.filename ||
+          composeData.fileName ||
+          composeData.data?.videoUrl ||
+          composeData.data?.video_url ||
+          composeData.data?.url ||
+          composeData.data?.filename ||
+          composeData.data?.fileName;
+
+        console.log(
+          'Raw final video value:',
+          rawFinalVideo
+        );
+
+        const finalVideoUrl =
+          makeBackendUrl(
+            rawFinalVideo
+          );
+
+        console.log(
+          'Resolved final video URL:',
+          finalVideoUrl
+        );
+
+        // ========================================
+        // NEVER USE undefined URL
+        // ========================================
+
+        if (!finalVideoUrl) {
+          console.error(
+            '❌ Backend did not provide a usable final video URL.'
+          );
+
+          console.error(
+            'Complete compose response:',
+            JSON.stringify(
+              composeData,
+              null,
+              2
+            )
+          );
+
+          throw new Error(
+            'The final video was created, but the backend did not return a usable video URL.'
+          );
+        }
+
+        // ========================================
+        // FINAL VIDEO READY
+        // ========================================
+
+        setGeneratedVideoUrl(
+          finalVideoUrl
+        );
+
+        setGenerationStage(
+          'idle'
+        );
+
+        console.log(
+          '======================================'
+        );
+
+        console.log(
+          '🎉 FINAL VIDEO READY'
+        );
+
+        console.log(
+          finalVideoUrl
+        );
+
+        console.log(
+          '======================================'
+        );
+
+        Alert.alert(
+          'Video Ready 🎉',
+          'Your farming video has been created successfully!',
+          [
+            {
+              text: 'Stay Here',
+              style: 'cancel',
+            },
+
+            {
+              text: 'Go to Home',
+              onPress: () => {
+                router.replace('/');
+              },
+            },
+          ],
+          {
+            cancelable: false,
+          }
+        );
+      } catch (error) {
+        console.error(
+          '❌ Video generation error:',
+          error
+        );
+
+        setGenerationStage(
+          'idle'
+        );
+
+        let message =
+          'Could not generate the farming video.';
+
+        if (
+          error instanceof Error
+        ) {
+          message =
+            error.message;
+        }
+
+        Alert.alert(
+          'Video generation failed',
+          message
+        );
+      } finally {
+        setGeneratingVideo(
+          false
+        );
+      }
+    };
+
+  // ==========================================
+  // GENERATION MESSAGE
+  // ==========================================
+
+  const getGenerationMessage =
+    () => {
+      switch (
+        generationStage
+      ) {
+        case 'background':
+          return backgroundMode ===
+            'photo'
+            ? '📷 Preparing Farm Photo...'
+            : '🎬 Animating Farm Background...';
+
+        case 'character':
+          return '🎭 Generating Animated Character...';
+
+        case 'composing':
+          return '🎬 Combining Farm + Character...';
+
+        default:
+          return '🎬 Generate Final Video';
+      }
+    };
+
+  // ==========================================
+  // OPEN GENERATED VIDEO
+  // ==========================================
+
+  const openGeneratedVideo =
+    async () => {
+      if (
+        !generatedVideoUrl ||
+        typeof generatedVideoUrl !==
+          'string' ||
+        !generatedVideoUrl.trim()
+      ) {
+        Alert.alert(
+          'Video unavailable',
+          'There is no valid generated video URL.'
         );
 
         return;
       }
 
-      await Sharing.shareAsync(
-        download.uri,
-        {
-          mimeType: 'video/mp4',
-          dialogTitle:
-            'Save or share Agriventure video',
-          UTI: 'public.mpeg-4',
+      const videoUrl =
+        generatedVideoUrl.trim();
+
+      if (
+        !videoUrl.startsWith(
+          'http://'
+        ) &&
+        !videoUrl.startsWith(
+          'https://'
+        )
+      ) {
+        Alert.alert(
+          'Invalid video URL',
+          `The backend returned an invalid video URL:\n\n${videoUrl}`
+        );
+
+        return;
+      }
+
+      try {
+        console.log(
+          '🎥 Opening generated video:',
+          videoUrl
+        );
+
+        const supported =
+          await Linking.canOpenURL(
+            videoUrl
+          );
+
+        if (!supported) {
+          throw new Error(
+            'Your device cannot open the generated video URL.'
+          );
         }
+
+        await Linking.openURL(
+          videoUrl
+        );
+      } catch (error) {
+        console.error(
+          'Open video error:',
+          error
+        );
+
+        Alert.alert(
+          'Could not open video',
+          error instanceof Error
+            ? error.message
+            : 'The generated video could not be opened.'
+        );
+      }
+    };
+
+  // ==========================================
+  // DOWNLOAD / SHARE GENERATED VIDEO
+  // ==========================================
+
+  const downloadGeneratedVideo =
+    async () => {
+      if (
+        !generatedVideoUrl ||
+        typeof generatedVideoUrl !==
+          'string' ||
+        !generatedVideoUrl.trim()
+      ) {
+        Alert.alert(
+          'Video unavailable',
+          'There is no valid generated video URL to download.'
+        );
+
+        return;
+      }
+
+      const videoUrl =
+        generatedVideoUrl.trim();
+
+      console.log(
+        '📥 Downloading final video:',
+        videoUrl
       );
-    } catch (error) {
-      Alert.alert(
-        'Download failed',
-        error instanceof Error
-          ? error.message
-          : 'Could not download the generated video.'
-      );
-    } finally {
-      setDownloadingVideo(false);
-    }
-  };
+
+      try {
+        setDownloadingVideo(
+          true
+        );
+
+        // ========================================
+        // VALIDATE URL
+        // ========================================
+
+        if (
+          !videoUrl.startsWith(
+            'http://'
+          ) &&
+          !videoUrl.startsWith(
+            'https://'
+          )
+        ) {
+          throw new Error(
+            `Invalid video URL returned by the backend: ${videoUrl}`
+          );
+        }
+
+        const documentDirectory =
+          FileSystem.documentDirectory;
+
+        if (!documentDirectory) {
+          throw new Error(
+            'Device storage is not available.'
+          );
+        }
+
+        const targetUri =
+          `${documentDirectory}agriventure-${Date.now()}.mp4`;
+
+        console.log(
+          '📥 Target file:',
+          targetUri
+        );
+
+        // ========================================
+        // DOWNLOAD
+        // ========================================
+
+        const download =
+          await FileSystem.downloadAsync(
+            videoUrl,
+            targetUri
+          );
+
+        console.log(
+          '✅ Download response:',
+          download
+        );
+
+        if (
+          !download ||
+          !download.uri
+        ) {
+          throw new Error(
+            'The video could not be downloaded because no local file was returned.'
+          );
+        }
+
+        // ========================================
+        // SHARE
+        // ========================================
+
+        const sharingAvailable =
+          await Sharing.isAvailableAsync();
+
+        if (!sharingAvailable) {
+          Alert.alert(
+            'Video downloaded',
+            'The video was saved successfully to your device.'
+          );
+
+          return;
+        }
+
+        await Sharing.shareAsync(
+          download.uri,
+          {
+            mimeType:
+              'video/mp4',
+
+            dialogTitle:
+              'Save or share Agriventure video',
+
+            UTI:
+              'public.mpeg-4',
+          }
+        );
+      } catch (error) {
+        console.error(
+          '❌ Download/share error:',
+          error
+        );
+
+        Alert.alert(
+          'Download failed',
+          error instanceof Error
+            ? error.message
+            : 'Could not download the generated video.'
+        );
+      } finally {
+        setDownloadingVideo(
+          false
+        );
+      }
+    };
 
   // ==========================================
   // RENDER
@@ -878,40 +1951,49 @@ export default function SceneScreen() {
         styles.container
       }
     >
-      {/* ======================================
-          TITLE
-      ====================================== */}
+      {/* TITLE */}
 
       <Text style={styles.title}>
         Scene 1
       </Text>
 
-      <Text style={styles.subtitle}>
+      <Text
+        style={styles.subtitle}
+      >
         Build your first farming scene
       </Text>
 
-      {/* ======================================
-          STORY
-      ====================================== */}
+      {/* STORY */}
 
-      <View style={styles.storyBox}>
-        <Text style={styles.storyTitle}>
-          {title || 'Untitled Story'}
+      <View
+        style={styles.storyBox}
+      >
+        <Text
+          style={styles.storyTitle}
+        >
+          {title ||
+            'Untitled Story'}
         </Text>
 
-        <Text style={styles.storyDescription}>
+        <Text
+          style={
+            styles.storyDescription
+          }
+        >
           {description ||
             'No story description yet.'}
         </Text>
       </View>
 
-      {/* ======================================
-          CHARACTERS LIST
-      ====================================== */}
+      {/* CHARACTERS LIST */}
 
-      {selectedCharacters.length > 0 && (
-        <View style={styles.characterBox}>
-
+      {selectedCharacters.length >
+        0 && (
+        <View
+          style={
+            styles.characterBox
+          }
+        >
           <Text
             style={
               styles.selectedCharacter
@@ -921,12 +2003,19 @@ export default function SceneScreen() {
           </Text>
 
           {selectedCharacters.map(
-            (character, index) => (
+            (
+              character,
+              index
+            ) => (
               <Text
                 key={`${character}-${index}`}
-                style={styles.characterItem}
+                style={
+                  styles.characterItem
+                }
               >
-                {characterPhotos[character]
+                {characterPhotos[
+                  character
+                ]
                   ? '🧑'
                   : getCharacterEmoji(
                       character
@@ -938,29 +2027,63 @@ export default function SceneScreen() {
         </View>
       )}
 
-      {/* ======================================
-          SCENE PREVIEW
-      ====================================== */}
+      {/* SCENE PREVIEW */}
 
-      <View style={styles.preview}>
+      <View
+        style={styles.preview}
+      >
+        {/* BACKGROUND MODE BADGE */}
 
-        {/* REAL BACKGROUND */}
+        {backgroundImage ? (
+          <View
+            style={
+              styles.backgroundModeBadge
+            }
+          >
+            <Text
+              style={
+                styles.backgroundModeBadgeText
+              }
+            >
+              {backgroundMode ===
+              'photo'
+                ? '📷 PHOTO'
+                : '🎬 GEMINI/VEO'}
+            </Text>
+          </View>
+        ) : null}
+
+        {/* BACKGROUND */}
 
         {backgroundImage ? (
           <Image
             source={{
               uri: backgroundImage,
             }}
-            style={styles.previewImage}
+            style={
+              styles.previewImage
+            }
             resizeMode="cover"
           />
         ) : (
-          <View style={styles.emptyPreview}>
-            <Text style={styles.previewIcon}>
+          <View
+            style={
+              styles.emptyPreview
+            }
+          >
+            <Text
+              style={
+                styles.previewIcon
+              }
+            >
               🌾
             </Text>
 
-            <Text style={styles.previewText}>
+            <Text
+              style={
+                styles.previewText
+              }
+            >
               Choose a real farm background
             </Text>
           </View>
@@ -969,30 +2092,40 @@ export default function SceneScreen() {
         {/* CHARACTERS */}
 
         {selectedCharacters.map(
-          (character, index) => (
+          (
+            character,
+            index
+          ) => (
             <DraggableCharacter
               key={`${character}-${index}`}
-              character={character}
+              character={
+                character
+              }
               characterPhoto={
                 characterPhotos[
                   character
                 ]
               }
               position={
-                characterPositions[index] || {
+                characterPositions[
+                  index
+                ] || {
                   x: 20,
                   y: 240,
                   size: 110,
                 }
               }
-              onMove={(x, y) =>
+              onMove={(
+                x,
+                y
+              ) =>
                 moveCharacter(
                   index,
                   x,
                   y
                 )
               }
-              onResize={(size) =>
+              onResize={size =>
                 resizeCharacter(
                   index,
                   size
@@ -1007,9 +2140,7 @@ export default function SceneScreen() {
           )
         )}
 
-        {/* ====================================
-            DIALOGUE OVERLAY
-        ==================================== */}
+        {/* DIALOGUE OVERLAY */}
 
         {savedDialogue ? (
           <View
@@ -1035,60 +2166,108 @@ export default function SceneScreen() {
             </Text>
           </View>
         ) : null}
-
       </View>
 
-      {/* ======================================
-          EDITOR INFORMATION
-      ====================================== */}
+      {/* BACKGROUND MODE INFORMATION */}
 
-      <View style={styles.infoBox}>
+      {backgroundImage ? (
+        <View
+          style={
+            styles.backgroundModeBox
+          }
+        >
+          <Text
+            style={
+              styles.backgroundModeTitle
+            }
+          >
+            {backgroundMode ===
+            'photo'
+              ? '📷 Photo Mode'
+              : '🎬 Gemini/Veo Mode'}
+          </Text>
 
-        <Text style={styles.infoTitle}>
+          <Text
+            style={
+              styles.backgroundModeText
+            }
+          >
+            {backgroundMode ===
+            'photo'
+              ? 'Your real farm photo will be kept as-is and converted into a video background using FFmpeg. Gemini/Veo will not be used.'
+              : 'Your real farm photo will be animated into a moving farm background using Gemini/Veo.'}
+          </Text>
+        </View>
+      ) : null}
+
+      {/* EDITOR INFORMATION */}
+
+      <View
+        style={styles.infoBox}
+      >
+        <Text
+          style={styles.infoTitle}
+        >
           🎬 Scene Editor
         </Text>
 
-        <Text style={styles.infoText}>
-          Drag a character to move them around
-          the farm. Use − and + to change their
-          size. Use ✕ to remove them.
+        <Text
+          style={styles.infoText}
+        >
+          Drag a character to move them
+          around the farm. Use − and +
+          to change their size. Use ✕
+          to remove them.
         </Text>
-
       </View>
 
-      {/* ======================================
-          DIALOGUE
-      ====================================== */}
+      {/* DIALOGUE */}
 
       {savedDialogue ? (
-        <View style={styles.dialogueBox}>
-
-          <Text style={styles.dialogueTitle}>
+        <View
+          style={
+            styles.dialogueBox
+          }
+        >
+          <Text
+            style={
+              styles.dialogueTitle
+            }
+          >
             💬 Dialogue
           </Text>
 
-          <Text style={styles.speaker}>
+          <Text
+            style={styles.speaker}
+          >
             {savedDialogueCharacter ||
               'Character'}
           </Text>
 
-          <Text style={styles.dialogueText}>
+          <Text
+            style={styles.dialogueText}
+          >
             "{savedDialogue}"
           </Text>
-
         </View>
       ) : null}
 
-      {/* ======================================
-          REMOVE BACKGROUND
-      ====================================== */}
+      {/* REMOVE BACKGROUND */}
 
       {backgroundImage ? (
         <Pressable
-          style={styles.removeButton}
-          onPress={() =>
-            setBackgroundImage(null)
+          style={
+            styles.removeButton
           }
+          onPress={() => {
+            setBackgroundImage(
+              null
+            );
+
+            setBackgroundMode(
+              'photo'
+            );
+          }}
         >
           <Text
             style={
@@ -1100,109 +2279,148 @@ export default function SceneScreen() {
         </Pressable>
       ) : null}
 
-      {/* ======================================
-          CHOOSE BACKGROUND
-      ====================================== */}
+      {/* CHOOSE BACKGROUND */}
 
       <Pressable
         style={styles.option}
         onPress={
           chooseBackground
         }
+        disabled={
+          generatingVideo
+        }
       >
-        <Text style={styles.optionTitle}>
+        <Text
+          style={styles.optionTitle}
+        >
           🖼️ Choose Background
         </Text>
 
-        <Text style={styles.optionText}>
-          Add a real farm photo
+        <Text
+          style={styles.optionText}
+        >
+          {backgroundImage
+            ? backgroundMode ===
+              'photo'
+              ? '📷 Using photo as-is'
+              : '🎬 Using Gemini/Veo animation'
+            : 'Add a real farm photo'}
         </Text>
       </Pressable>
 
-      {/* ======================================
-          CHARACTERS
-      ====================================== */}
+      {/* CHARACTERS */}
 
       <Pressable
         style={styles.option}
         onPress={
           openCharacters
         }
+        disabled={
+          generatingVideo
+        }
       >
-        <Text style={styles.optionTitle}>
+        <Text
+          style={styles.optionTitle}
+        >
           🎭 Add Character
         </Text>
 
-        <Text style={styles.optionText}>
+        <Text
+          style={styles.optionText}
+        >
           Add, remove, or change characters
         </Text>
       </Pressable>
 
-      {/* ======================================
-          DIALOGUE
-      ====================================== */}
+      {/* DIALOGUE */}
 
       <Pressable
         style={styles.option}
         onPress={
           openDialogue
         }
+        disabled={
+          generatingVideo
+        }
       >
-        <Text style={styles.optionTitle}>
+        <Text
+          style={styles.optionTitle}
+        >
           💬 Add Dialogue
         </Text>
 
-        <Text style={styles.optionText}>
+        <Text
+          style={styles.optionText}
+        >
           {savedDialogue
             ? 'Edit character dialogue'
             : 'Add what your characters will say'}
         </Text>
       </Pressable>
 
-      {/* ======================================
-          PREPARE
-      ====================================== */}
+      {/* GENERATE */}
 
       <Pressable
-        style={
-          [
-            styles.generateButton,
-            generatingVideo &&
-              styles.generateButtonDisabled,
-          ]
-        }
+        style={[
+          styles.generateButton,
+          generatingVideo &&
+            styles.generateButtonDisabled,
+        ]}
         onPress={
           generateScene
         }
-        disabled={generatingVideo}
+        disabled={
+          generatingVideo
+        }
       >
         <Text
           style={
             styles.generateButtonText
           }
         >
-          {generatingVideo
-            ? '⏳ Generating HeyGen Video...'
-            : '🎬 Generate with HeyGen'}
+          {getGenerationMessage()}
         </Text>
       </Pressable>
 
+      {/* GENERATED VIDEO */}
+
       {generatedVideoUrl ? (
-        <View style={styles.generatedVideoBox}>
-          <Text style={styles.generatedVideoTitle}>
-            HeyGen video ready
+        <View
+          style={
+            styles.generatedVideoBox
+          }
+        >
+          <Text
+            style={
+              styles.generatedVideoTitle
+            }
+          >
+            🎉 Agriventure video ready
+          </Text>
+
+          <Text
+            style={
+              styles.generatedVideoUrlText
+            }
+            numberOfLines={2}
+          >
+            {generatedVideoUrl}
           </Text>
 
           <Pressable
-            style={styles.openVideoButton}
-            onPress={() =>
-              Linking.openURL(
-                generatedVideoUrl
-              )
+            style={
+              styles.openVideoButton
+            }
+            onPress={
+              openGeneratedVideo
             }
           >
-            <Text style={styles.openVideoButtonText}>
-              Open Generated Video
+            <Text
+              style={
+                styles.openVideoButtonText
+              }
+            >
+              ▶ Open Generated Video
             </Text>
           </Pressable>
 
@@ -1212,18 +2430,25 @@ export default function SceneScreen() {
               downloadingVideo &&
                 styles.downloadVideoButtonDisabled,
             ]}
-            onPress={downloadGeneratedVideo}
-            disabled={downloadingVideo}
+            onPress={
+              downloadGeneratedVideo
+            }
+            disabled={
+              downloadingVideo
+            }
           >
-            <Text style={styles.downloadVideoButtonText}>
+            <Text
+              style={
+                styles.downloadVideoButtonText
+              }
+            >
               {downloadingVideo
                 ? 'Downloading Video...'
-                : 'Download Video'}
+                : '⬇ Download / Share Video'}
             </Text>
           </Pressable>
         </View>
       ) : null}
-
     </ScrollView>
   );
 }
@@ -1232,348 +2457,389 @@ export default function SceneScreen() {
 // STYLES
 // ==========================================
 
-const styles = StyleSheet.create({
+const styles =
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: '#f7f7f7',
+    },
 
-  screen: {
-    flex: 1,
-    backgroundColor: '#f7f7f7',
-  },
+    container: {
+      padding: 20,
+      paddingTop: 30,
+      paddingBottom: 60,
+    },
 
-  container: {
-    padding: 20,
-    paddingTop: 30,
-    paddingBottom: 60,
-  },
+    title: {
+      fontSize: 30,
+      fontWeight: 'bold',
+    },
 
-  title: {
-    fontSize: 30,
-    fontWeight: 'bold',
-  },
+    subtitle: {
+      fontSize: 16,
+      marginTop: 8,
+      marginBottom: 20,
+      color: '#555',
+    },
 
-  subtitle: {
-    fontSize: 16,
-    marginTop: 8,
-    marginBottom: 20,
-    color: '#555',
-  },
+    storyBox: {
+      backgroundColor: '#f0f7f0',
+      padding: 15,
+      borderRadius: 12,
+      marginBottom: 15,
+    },
 
-  // ========================================
-  // STORY
-  // ========================================
+    storyTitle: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      marginBottom: 5,
+    },
 
-  storyBox: {
-    backgroundColor: '#f0f7f0',
-    padding: 15,
-    borderRadius: 12,
-    marginBottom: 15,
-  },
+    storyDescription: {
+      fontSize: 14,
+      lineHeight: 20,
+    },
 
-  storyTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 5,
-  },
+    characterBox: {
+      backgroundColor: '#e8f5e9',
+      padding: 12,
+      borderRadius: 10,
+      marginBottom: 15,
+    },
 
-  storyDescription: {
-    fontSize: 14,
-    lineHeight: 20,
-  },
+    selectedCharacter: {
+      fontSize: 16,
+      fontWeight: 'bold',
+      marginBottom: 5,
+    },
 
-  // ========================================
-  // CHARACTER LIST
-  // ========================================
+    characterItem: {
+      fontSize: 15,
+      marginTop: 5,
+    },
 
-  characterBox: {
-    backgroundColor: '#e8f5e9',
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 15,
-  },
+    preview: {
+      width: '100%',
+      aspectRatio: 9 / 16,
+      borderRadius: 15,
+      backgroundColor: '#dfe8df',
+      justifyContent: 'center',
+      alignItems: 'center',
+      overflow: 'hidden',
+      marginBottom: 15,
+      position: 'relative',
+    },
 
-  selectedCharacter: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 5,
-  },
+    previewImage: {
+      position: 'absolute',
+      width: '100%',
+      height: '100%',
+    },
 
-  characterItem: {
-    fontSize: 15,
-    marginTop: 5,
-  },
+    emptyPreview: {
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingHorizontal: 30,
+    },
 
-  // ========================================
-  // PREVIEW
-  // ========================================
+    previewIcon: {
+      fontSize: 50,
+      marginBottom: 10,
+    },
 
-  preview: {
-    width: '100%',
-    aspectRatio: 9 / 16,
-    borderRadius: 15,
-    backgroundColor: '#dfe8df',
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-    marginBottom: 15,
-    position: 'relative',
-  },
+    previewText: {
+      fontSize: 17,
+      fontWeight: 'bold',
+      color: '#555',
+      textAlign: 'center',
+    },
 
-  previewImage: {
-    position: 'absolute',
-    width: '100%',
-    height: '100%',
-  },
+    // ======================================
+    // BACKGROUND MODE
+    // ======================================
 
-  emptyPreview: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 30,
-  },
+    backgroundModeBadge: {
+      position: 'absolute',
+      top: 10,
+      right: 10,
+      zIndex: 50,
+      backgroundColor:
+        'rgba(0,0,0,0.75)',
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 8,
+    },
 
-  previewIcon: {
-    fontSize: 50,
-    marginBottom: 10,
-  },
+    backgroundModeBadgeText: {
+      color: 'white',
+      fontSize: 12,
+      fontWeight: 'bold',
+    },
 
-  previewText: {
-    fontSize: 17,
-    fontWeight: 'bold',
-    color: '#555',
-    textAlign: 'center',
-  },
+    backgroundModeBox: {
+      backgroundColor: '#eef7ee',
+      padding: 14,
+      borderRadius: 12,
+      marginBottom: 15,
+      borderWidth: 1,
+      borderColor: '#c8e6c9',
+    },
 
-  // ========================================
-  // CHARACTER
-  // ========================================
+    backgroundModeTitle: {
+      fontSize: 16,
+      fontWeight: 'bold',
+      marginBottom: 5,
+      color: '#1b5e20',
+    },
 
-  characterOnScene: {
-    position: 'absolute',
-    alignItems: 'center',
-    zIndex: 10,
-  },
+    backgroundModeText: {
+      fontSize: 13,
+      lineHeight: 19,
+      color: '#444',
+    },
 
-  characterEmoji: {
-    textAlign: 'center',
-  },
+    // ======================================
+    // CHARACTERS
+    // ======================================
 
-  characterName: {
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    color: 'white',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    fontSize: 11,
-    fontWeight: 'bold',
-    marginTop: 2,
-  },
+    characterOnScene: {
+      position: 'absolute',
+      alignItems: 'center',
+      zIndex: 10,
+    },
 
-  characterControls: {
-    flexDirection: 'row',
-    marginTop: 5,
-    gap: 5,
-  },
+    characterEmoji: {
+      textAlign: 'center',
+    },
 
-  controlButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(0,0,0,0.75)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+    characterName: {
+      backgroundColor:
+        'rgba(0,0,0,0.65)',
+      color: 'white',
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 6,
+      fontSize: 11,
+      fontWeight: 'bold',
+      marginTop: 2,
+    },
 
-  deleteButton: {
-    backgroundColor: 'rgba(180,0,0,0.85)',
-  },
+    characterControls: {
+      flexDirection: 'row',
+      marginTop: 5,
+      gap: 5,
+    },
 
-  controlButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
-    lineHeight: 20,
-  },
+    controlButton: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor:
+        'rgba(0,0,0,0.75)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
 
-  // ========================================
-  // INFO
-  // ========================================
+    deleteButton: {
+      backgroundColor:
+        'rgba(180,0,0,0.85)',
+    },
 
-  infoBox: {
-    backgroundColor: '#eef6ff',
-    padding: 14,
-    borderRadius: 12,
-    marginBottom: 15,
-  },
+    controlButtonText: {
+      color: 'white',
+      fontSize: 16,
+      fontWeight: 'bold',
+      lineHeight: 20,
+    },
 
-  infoTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 5,
-  },
+    // ======================================
+    // INFORMATION
+    // ======================================
 
-  infoText: {
-    fontSize: 13,
-    lineHeight: 19,
-    color: '#444',
-  },
+    infoBox: {
+      backgroundColor: '#eef6ff',
+      padding: 14,
+      borderRadius: 12,
+      marginBottom: 15,
+    },
 
-  // ========================================
-  // DIALOGUE
-  // ========================================
+    infoTitle: {
+      fontSize: 16,
+      fontWeight: 'bold',
+      marginBottom: 5,
+    },
 
-  dialogueBox: {
-    backgroundColor: '#fff8e1',
-    padding: 15,
-    borderRadius: 12,
-    marginBottom: 15,
-  },
+    infoText: {
+      fontSize: 13,
+      lineHeight: 19,
+      color: '#444',
+    },
 
-  dialogueTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
+    // ======================================
+    // DIALOGUE
+    // ======================================
 
-  speaker: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#2e7d32',
-    marginBottom: 5,
-  },
+    dialogueBox: {
+      backgroundColor: '#fff8e1',
+      padding: 15,
+      borderRadius: 12,
+      marginBottom: 15,
+    },
 
-  dialogueText: {
-    fontSize: 15,
-    lineHeight: 22,
-    fontStyle: 'italic',
-  },
+    dialogueTitle: {
+      fontSize: 16,
+      fontWeight: 'bold',
+      marginBottom: 8,
+    },
 
-  // ========================================
-  // DIALOGUE OVERLAY
-  // ========================================
+    speaker: {
+      fontSize: 14,
+      fontWeight: 'bold',
+      color: '#2e7d32',
+      marginBottom: 5,
+    },
 
-  dialogueOverlay: {
-    position: 'absolute',
-    left: 15,
-    right: 15,
-    bottom: 20,
-    backgroundColor: 'rgba(0,0,0,0.70)',
-    borderRadius: 12,
-    padding: 12,
-    zIndex: 20,
-  },
+    dialogueText: {
+      fontSize: 15,
+      lineHeight: 22,
+      fontStyle: 'italic',
+    },
 
-  dialogueOverlaySpeaker: {
-    color: '#90ee90',
-    fontSize: 13,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
+    dialogueOverlay: {
+      position: 'absolute',
+      left: 15,
+      right: 15,
+      bottom: 20,
+      backgroundColor:
+        'rgba(0,0,0,0.70)',
+      borderRadius: 12,
+      padding: 12,
+      zIndex: 20,
+    },
 
-  dialogueOverlayText: {
-    color: 'white',
-    fontSize: 14,
-    lineHeight: 20,
-  },
+    dialogueOverlaySpeaker: {
+      color: '#90ee90',
+      fontSize: 13,
+      fontWeight: 'bold',
+      marginBottom: 4,
+    },
 
-  // ========================================
-  // REMOVE BACKGROUND
-  // ========================================
+    dialogueOverlayText: {
+      color: 'white',
+      fontSize: 14,
+      lineHeight: 20,
+    },
 
-  removeButton: {
-    alignItems: 'center',
-    marginBottom: 15,
-  },
+    // ======================================
+    // BACKGROUND BUTTON
+    // ======================================
 
-  removeButtonText: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#0a892e',
-  },
+    removeButton: {
+      alignItems: 'center',
+      marginBottom: 15,
+    },
 
-  // ========================================
-  // OPTIONS
-  // ========================================
+    removeButtonText: {
+      fontSize: 14,
+      fontWeight: 'bold',
+      color: '#0a892e',
+    },
 
-  option: {
-    padding: 18,
-    borderRadius: 12,
-    backgroundColor: '#ffffff',
-    marginBottom: 12,
-    elevation: 2,
-  },
+    // ======================================
+    // OPTIONS
+    // ======================================
 
-  optionTitle: {
-    fontSize: 17,
-    fontWeight: 'bold',
-  },
+    option: {
+      padding: 18,
+      borderRadius: 12,
+      backgroundColor: '#ffffff',
+      marginBottom: 12,
+      elevation: 2,
+    },
 
-  optionText: {
-    fontSize: 14,
-    marginTop: 5,
-    color: '#555',
-  },
+    optionTitle: {
+      fontSize: 17,
+      fontWeight: 'bold',
+    },
 
-  // ========================================
-  // GENERATE
-  // ========================================
+    optionText: {
+      fontSize: 14,
+      marginTop: 5,
+      color: '#555',
+    },
 
-  generateButton: {
-    backgroundColor: '#2e7d32',
-    paddingVertical: 17,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginTop: 10,
-  },
+    // ======================================
+    // GENERATE
+    // ======================================
 
-  generateButtonText: {
-    color: 'white',
-    fontSize: 17,
-    fontWeight: 'bold',
-  },
+    generateButton: {
+      backgroundColor: '#2e7d32',
+      paddingVertical: 17,
+      borderRadius: 12,
+      alignItems: 'center',
+      marginTop: 10,
+    },
 
-  generateButtonDisabled: {
-    opacity: 0.6,
-  },
+    generateButtonText: {
+      color: 'white',
+      fontSize: 17,
+      fontWeight: 'bold',
+    },
 
-  generatedVideoBox: {
-    marginTop: 16,
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: '#e8f5e9',
-  },
+    generateButtonDisabled: {
+      opacity: 0.6,
+    },
 
-  generatedVideoTitle: {
-    marginBottom: 10,
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1b5e20',
-  },
+    // ======================================
+    // GENERATED VIDEO
+    // ======================================
 
-  openVideoButton: {
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: '#2e7d32',
-  },
+    generatedVideoBox: {
+      marginTop: 16,
+      padding: 16,
+      borderRadius: 12,
+      backgroundColor: '#e8f5e9',
+    },
 
-  openVideoButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
+    generatedVideoTitle: {
+      marginBottom: 10,
+      fontSize: 16,
+      fontWeight: 'bold',
+      color: '#1b5e20',
+    },
 
-  downloadVideoButton: {
-    alignItems: 'center',
-    marginTop: 10,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: '#1565c0',
-  },
+    generatedVideoUrlText: {
+      fontSize: 11,
+      color: '#555',
+      marginBottom: 10,
+    },
 
-  downloadVideoButtonDisabled: {
-    opacity: 0.6,
-  },
+    openVideoButton: {
+      alignItems: 'center',
+      paddingVertical: 12,
+      borderRadius: 8,
+      backgroundColor: '#2e7d32',
+    },
 
-  downloadVideoButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
+    openVideoButtonText: {
+      color: 'white',
+      fontWeight: 'bold',
+    },
 
-});
+    downloadVideoButton: {
+      alignItems: 'center',
+      marginTop: 10,
+      paddingVertical: 12,
+      borderRadius: 8,
+      backgroundColor: '#1565c0',
+    },
+
+    downloadVideoButtonDisabled: {
+      opacity: 0.6,
+    },
+
+    downloadVideoButtonText: {
+      color: 'white',
+      fontWeight: 'bold',
+    },
+  });
