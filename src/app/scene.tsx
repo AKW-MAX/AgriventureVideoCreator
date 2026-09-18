@@ -4,15 +4,15 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useRef, useState } from 'react';
 import {
-  Alert,
-  Image,
-  Linking,
-  PanResponder,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+    Alert,
+    Image,
+    Linking,
+    PanResponder,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from 'react-native';
 
 // ==========================================
@@ -46,7 +46,7 @@ type BackgroundMode = 'photo' | 'video';
 // BACKEND
 // ==========================================
 
-const BACKEND_URL = 'http://10.159.131.218:5001';
+const BACKEND_URL = 'https://agriventurevideobackend.onrender.com';
 
 // ==========================================
 // CHARACTER EMOJIS

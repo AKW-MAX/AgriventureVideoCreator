@@ -66,7 +66,7 @@ const characters = [
  * Your phone and laptop must be connected
  * to the same network/hotspot.
  */
-const BACKEND_URL = 'http://10.159.131.218:5001';
+const BACKEND_URL = 'https://agriventurevideobackend.onrender.com';
 
 export default function CharactersScreen() {
   const router = useRouter();

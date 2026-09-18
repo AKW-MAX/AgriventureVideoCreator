@@ -3,16 +3,16 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useCallback, useState } from 'react';
 import {
-  Alert,
-  Linking,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+    Alert,
+    Linking,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from 'react-native';
 
-const BACKEND_URL = 'http://10.159.131.218:5001';
+const BACKEND_URL = 'https://agriventurevideobackend.onrender.com';
 
 type CreatedVideo = {
   id: string;

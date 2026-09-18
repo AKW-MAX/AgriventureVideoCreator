@@ -4,22 +4,22 @@ import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+    ActivityIndicator,
+    Alert,
+    Image,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from 'react-native';
 
 // ======================================================
 // BACKEND
 // ======================================================
 
-const API_BASE_URL = 'http://10.159.131.218:5001';
+const API_BASE_URL = 'https://agriventurevideobackend.onrender.com';
 
 // ======================================================
 // THEME COLORS
