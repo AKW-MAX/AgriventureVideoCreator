@@ -4,15 +4,15 @@ import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useMemo, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 
 // ======================================================
@@ -194,6 +194,9 @@ export default function PosterScreen() {
 
   const [promoText, setPromoText] =
     useState('');
+
+  const [price, setPrice] = useState('');
+  const [advantages, setAdvantages] = useState('');
 
   // ====================================================
   // DESIGN
@@ -500,6 +503,9 @@ export default function PosterScreen() {
 
         promoText:
           promoText.trim(),
+
+        price: price.trim(),
+        advantages: advantages.split(/\r?\n/).map(item => item.replace(/^[\s•✓✔-]+/, '').trim()).filter(Boolean),
 
         template:
           selectedTemplate,
@@ -862,13 +868,19 @@ export default function PosterScreen() {
             </Text>
 
             <Text
-              style={
-                styles.previewDescription
-              }
+              style={styles.previewDescription}
               numberOfLines={3}
             >
               {descriptionText}
             </Text>
+            {advantages.trim() ? (
+              <Text style={styles.previewDescription} numberOfLines={4}>
+                {advantages.split(/\r?\n/).filter(Boolean).slice(0, 3).map(a => `✓ ${a.trim()}`).join('\n')}
+              </Text>
+            ) : null}
+            {price.trim() ? (
+              <Text style={styles.previewProductName} numberOfLines={1}>{price.trim()}</Text>
+            ) : null}
 
             <View
               style={[
@@ -1973,7 +1985,7 @@ export default function PosterScreen() {
                     </View>
 
                     <Text
-                      style={[
+                     style={[
                         styles.colorName,
                         isSelected &&
                           styles.colorNameSelected,
@@ -2241,6 +2253,26 @@ export default function PosterScreen() {
             styles.textInput,
             styles.multilineInput,
           ]}
+        />
+
+        <Text style={styles.inputLabel}>Product Price</Text>
+        <TextInput
+          value={price}
+          onChangeText={(value) => { setPrice(value); setGeneratedPosterUrl(null); }}
+          placeholder="e.g. KSh 450"
+          placeholderTextColor="#999"
+          style={styles.textInput}
+        />
+
+        <Text style={styles.inputLabel}>Product Advantages (one per line)</Text>
+        <TextInput
+          value={advantages}
+          onChangeText={(value) => { setAdvantages(value); setGeneratedPosterUrl(null); }}
+          placeholder={'Ready to use\nTargeted application\nEasy to apply'}
+          placeholderTextColor="#999"
+          multiline
+          textAlignVertical="top"
+          style={[styles.textInput, styles.multilineInput]}
         />
 
         <Text
