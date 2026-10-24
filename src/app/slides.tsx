@@ -1,5 +1,5 @@
 import * as FileSystem from 'expo-file-system/legacy';
-import { File } from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
@@ -62,9 +62,11 @@ function getAudioMimeType(mimeType: string | null | undefined, name: string): st
 }
 
 async function readAsDataUri(uri: string, mimeType: string): Promise<string> {
-  const base64 = await FileSystem.readAsStringAsync(uri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
+  const base64 = Platform.OS === 'web'
+    ? await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      })
+    : await new File(uri).base64();
   if (!base64) {
     throw new Error('A selected file could not be read. Please choose it again.');
   }
@@ -140,14 +142,22 @@ export default function SlidesScreen() {
         type: 'audio/*',
         copyToCacheDirectory: true,
         multiple: false,
-        base64: true,
       });
       if (result.canceled || !result.assets[0]) return;
 
       const asset = result.assets[0];
-      const selectedBase64 = Platform.OS === 'web'
-        ? asset.base64
-        : await new File(asset.uri).base64();
+      let selectedBase64: string | undefined;
+      if (Platform.OS === 'web') {
+        selectedBase64 = asset.base64;
+      } else {
+        const extension = asset.name.split('.').pop()?.replace(/[^a-z0-9]/gi, '') || 'audio';
+        const cachedMusic = new File(
+          Paths.cache,
+          `agriventure-slide-music-${Date.now()}.${extension}`
+        );
+        await new File(asset.uri).copy(cachedMusic, { overwrite: true });
+        selectedBase64 = await cachedMusic.base64();
+      }
       if (!selectedBase64) {
         throw new Error('The selected music file could not be read. Please choose it again.');
       }
