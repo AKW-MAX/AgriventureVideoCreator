@@ -1,5 +1,5 @@
 import * as FileSystem from 'expo-file-system/legacy';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useCallback, useState } from 'react';
 import {
@@ -232,6 +232,14 @@ export default function HomeScreen() {
     router.push('/poster');
   };
 
+  const createSlides = () => {
+    router.push('/slides' as Href);
+  };
+
+  const createMusic = () => {
+    router.push('/composer' as Href);
+  };
+
   return (
     <ScrollView
       contentContainerStyle={styles.container}
@@ -276,6 +284,44 @@ export default function HomeScreen() {
         >
           <Text style={styles.posterButtonText}>
             📢 Create Product Poster
+          </Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.posterSection}>
+        <Text style={styles.posterTitle}>
+          Create a Video Slideshow
+        </Text>
+
+        <Text style={styles.posterDescription}>
+          Build a video from your photos and captions, then add music.
+        </Text>
+
+        <Pressable
+          style={styles.posterButton}
+          onPress={createSlides}
+        >
+          <Text style={styles.posterButtonText}>
+            🎞️ Make Video Slides
+          </Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.posterSection}>
+        <Text style={styles.posterTitle}>
+          Make Your Own Music
+        </Text>
+
+        <Text style={styles.posterDescription}>
+          Build a beat, add a melody, and save a loop for your videos.
+        </Text>
+
+        <Pressable
+          style={styles.posterButton}
+          onPress={createMusic}
+        >
+          <Text style={styles.posterButtonText}>
+            🎵 Open Beat & Melody Maker
           </Text>
         </Pressable>
       </View>

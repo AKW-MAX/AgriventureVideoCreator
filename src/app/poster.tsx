@@ -151,6 +151,8 @@ export default function PosterScreen() {
 
   const [logoUri, setLogoUri] =
     useState<string | null>(null);
+  const [selectedLogoDataUri, setSelectedLogoDataUri] =
+    useState<string | null>(null);
 
   const [businessName, setBusinessName] =
     useState('');
@@ -297,6 +299,7 @@ export default function PosterScreen() {
         await ImagePicker.launchImageLibraryAsync({
           mediaTypes: ['images'],
           allowsEditing: false,
+          base64: type === 'logo',
           quality: 0.9,
         });
 
@@ -307,11 +310,16 @@ export default function PosterScreen() {
         return;
       }
 
-      const selectedUri =
-        result.assets[0].uri;
+      const selectedAsset = result.assets[0];
+      const selectedUri = selectedAsset.uri;
 
       if (type === 'logo') {
         setLogoUri(selectedUri);
+        setSelectedLogoDataUri(
+          selectedAsset.base64
+            ? `data:image/jpeg;base64,${selectedAsset.base64}`
+            : null
+        );
       } else {
         setProductImageUri(selectedUri);
       }
@@ -336,6 +344,7 @@ export default function PosterScreen() {
 
   const removeLogo = () => {
     setLogoUri(null);
+    setSelectedLogoDataUri(null);
     setGeneratedPosterUrl(null);
   };
 
@@ -452,6 +461,7 @@ export default function PosterScreen() {
 
       if (logoUri) {
         logoDataUri =
+          selectedLogoDataUri ??
           await uriToDataUri(logoUri);
       }
 
@@ -3273,10 +3283,10 @@ const styles = StyleSheet.create({
   },
 
   previewDescription: {
-    fontSize: 10,
-    lineHeight: 14,
+    fontSize: 13,
+    lineHeight: 18,
     color: '#5D685F',
-    marginTop: 6,
+    marginTop: 9,
   },
 
   previewAccentLine: {
@@ -3345,10 +3355,10 @@ const styles = StyleSheet.create({
   },
 
   boldDescription: {
-    fontSize: 10,
-    lineHeight: 14,
+    fontSize: 13,
+    lineHeight: 18,
     color: '#5F6961',
-    marginTop: 7,
+    marginTop: 10,
   },
 
   boldPromo: {
@@ -3413,17 +3423,17 @@ const styles = StyleSheet.create({
   },
 
   premiumIngredient: {
-    fontSize: 10,
+    fontSize: 13,
     color: '#626B64',
-    marginTop: 6,
+    marginTop: 9,
     fontWeight: '700',
   },
 
   premiumDescription: {
-    fontSize: 10,
-    lineHeight: 14,
+    fontSize: 13,
+    lineHeight: 18,
     color: '#687168',
-    marginTop: 7,
+    marginTop: 10,
   },
 
   // ====================================================
@@ -3486,17 +3496,17 @@ const styles = StyleSheet.create({
   },
 
   pestDetail: {
-    fontSize: 9,
-    lineHeight: 13,
+    fontSize: 12,
+    lineHeight: 17,
     color: '#5E685F',
-    marginTop: 5,
+    marginTop: 8,
   },
 
   pestUsage: {
-    fontSize: 9,
-    lineHeight: 13,
+    fontSize: 12,
+    lineHeight: 17,
     color: '#3F4A41',
-    marginTop: 8,
+    marginTop: 12,
     fontWeight: '700',
   },
 
@@ -3565,11 +3575,11 @@ const styles = StyleSheet.create({
   },
 
   promoDescription: {
-    fontSize: 10,
-    lineHeight: 14,
+    fontSize: 13,
+    lineHeight: 18,
     color: '#647067',
     paddingHorizontal: 14,
-    marginTop: 6,
+    marginTop: 9,
   },
 
   // ====================================================
@@ -3631,18 +3641,18 @@ const styles = StyleSheet.create({
   },
 
   infoRow: {
-    fontSize: 9,
-    lineHeight: 13,
+    fontSize: 12,
+    lineHeight: 17,
     color: '#58635A',
-    marginBottom: 4,
+    marginBottom: 7,
   },
 
   infoUsage: {
-    fontSize: 9,
-    lineHeight: 13,
+    fontSize: 12,
+    lineHeight: 17,
     color: '#354037',
     fontWeight: '700',
-    marginTop: 6,
+    marginTop: 9,
   },
 
   // ====================================================
@@ -3740,9 +3750,9 @@ const styles = StyleSheet.create({
 
   socialDescription: {
     color: '#FFFFFF',
-    fontSize: 10,
-    lineHeight: 14,
-    marginTop: 6,
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 9,
     textShadowColor:
       'rgba(0,0,0,0.5)',
     textShadowOffset: {
@@ -3830,10 +3840,10 @@ const styles = StyleSheet.create({
   },
 
   minimalDescription: {
-    fontSize: 10,
-    lineHeight: 14,
+    fontSize: 13,
+    lineHeight: 18,
     color: '#69736B',
-    marginTop: 7,
+    marginTop: 10,
   },
 
   // ====================================================
