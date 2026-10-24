@@ -2,6 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { File } from 'expo-file-system';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
+import * as MediaLibrary from 'expo-media-library';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useState } from 'react';
@@ -82,6 +83,7 @@ export default function SlidesScreen() {
   ]);
   const [music, setMusic] = useState<MusicSelection | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [isSavingVideo, setIsSavingVideo] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
 
   const updateSlide = (id: string, changes: Partial<Slide>) => {
@@ -253,6 +255,48 @@ export default function SlidesScreen() {
     }
   };
 
+  const downloadVideo = async () => {
+    if (!videoUrl) return;
+
+    try {
+      setIsSavingVideo(true);
+
+      if (Platform.OS === 'web') {
+        await shareVideo();
+        return;
+      }
+
+      const permission = await MediaLibrary.requestPermissionsAsync(true, ['video']);
+      if (permission.status !== 'granted') {
+        throw new Error('Allow video access so Agriventure can save the slideshow to your gallery.');
+      }
+
+      const cacheDirectory = FileSystem.cacheDirectory;
+      if (!cacheDirectory) {
+        throw new Error('Temporary storage is not available on this device.');
+      }
+
+      const result = await FileSystem.downloadAsync(
+        videoUrl,
+        `${cacheDirectory}agriventure-slideshow-${Date.now()}.mp4`
+      );
+      if (result.status !== 200) {
+        throw new Error(`Could not download the video (server returned ${result.status}).`);
+      }
+
+      await MediaLibrary.createAssetAsync(result.uri);
+      Alert.alert('Video saved', 'Your slideshow was saved to your device gallery.');
+    } catch (error) {
+      console.error('Slideshow save error:', error);
+      Alert.alert(
+        'Unable to save video',
+        error instanceof Error ? error.message : 'Please try again.'
+      );
+    } finally {
+      setIsSavingVideo(false);
+    }
+  };
+
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <Pressable onPress={() => router.back()} style={styles.backButton}>
@@ -368,7 +412,18 @@ export default function SlidesScreen() {
               <Text style={styles.secondaryButtonText}>▶ Open video</Text>
             </Pressable>
             <Pressable style={styles.createButton} onPress={shareVideo}>
-              <Text style={styles.createButtonText}>Save / share</Text>
+              <Text style={styles.createButtonText}>Share video</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.downloadButton, isSavingVideo && styles.disabledButton]}
+              onPress={downloadVideo}
+              disabled={isSavingVideo}
+            >
+              {isSavingVideo ? (
+                <ActivityIndicator color="#ffffff" />
+              ) : (
+                <Text style={styles.createButtonText}>Download to device</Text>
+              )}
             </Pressable>
           </View>
         </View>
@@ -465,6 +520,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#2e7d32',
   },
   createButtonText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
+  downloadButton: {
+    minHeight: 50,
+    marginTop: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: '#555555',
+  },
   disabledButton: { opacity: 0.5 },
   resultCard: { marginTop: 20, padding: 15, borderRadius: 14, backgroundColor: '#f4f8f4' },
   resultActions: { gap: 10 },
