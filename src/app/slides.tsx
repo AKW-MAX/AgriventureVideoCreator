@@ -1,4 +1,5 @@
 import * as FileSystem from 'expo-file-system/legacy';
+import { File } from 'expo-file-system';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
@@ -10,6 +11,7 @@ import {
   Image,
   Linking,
   Pressable,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -29,7 +31,7 @@ type Slide = {
 type MusicSelection = {
   name: string;
   mimeType: string;
-  uri: string;
+  base64: string;
 };
 
 function getImageMimeType(uri: string): string {
@@ -66,6 +68,10 @@ async function readAsDataUri(uri: string, mimeType: string): Promise<string> {
     throw new Error('A selected file could not be read. Please choose it again.');
   }
   return `data:${mimeType};base64,${base64}`;
+}
+
+function stripDataUriPrefix(value: string): string {
+  return value.replace(/^data:[^;]+;base64,/i, '');
 }
 
 export default function SlidesScreen() {
@@ -132,19 +138,30 @@ export default function SlidesScreen() {
         type: 'audio/*',
         copyToCacheDirectory: true,
         multiple: false,
+        base64: true,
       });
       if (result.canceled || !result.assets[0]) return;
 
       const asset = result.assets[0];
+      const selectedBase64 = Platform.OS === 'web'
+        ? asset.base64
+        : await new File(asset.uri).base64();
+      if (!selectedBase64) {
+        throw new Error('The selected music file could not be read. Please choose it again.');
+      }
+
       setMusic({
         name: asset.name,
         mimeType: getAudioMimeType(asset.mimeType, asset.name),
-        uri: asset.uri,
+        base64: stripDataUriPrefix(selectedBase64),
       });
       setVideoUrl(null);
     } catch (error) {
       console.error('Music picker error:', error);
-      Alert.alert('Music error', 'Unable to select that music file. Please try again.');
+      Alert.alert(
+        'Music error',
+        error instanceof Error ? error.message : 'Unable to select that music file. Please try again.'
+      );
     }
   };
 
@@ -170,7 +187,7 @@ export default function SlidesScreen() {
       const musicPayload = music
         ? {
             mimeType: music.mimeType,
-            data: await readAsDataUri(music.uri, music.mimeType),
+            data: `data:${music.mimeType};base64,${music.base64}`,
           }
         : null;
 
