@@ -44,13 +44,6 @@
           "imageWidth": 76
         }
       ],
-      [
-        "expo-media-library",
-        {
-          "savePhotosPermission": "Allow Agriventure to save your slideshow videos to your gallery.",
-          "granularPermissions": ["video"]
-        }
-      ],
       "expo-audio",
       "expo-sharing",
       "expo-asset",

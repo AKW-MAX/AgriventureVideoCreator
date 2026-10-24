@@ -2,7 +2,6 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { File, Paths } from 'expo-file-system';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
-import * as MediaLibrary from 'expo-media-library/legacy';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useState } from 'react';
@@ -276,9 +275,9 @@ export default function SlidesScreen() {
         return;
       }
 
-      const permission = await MediaLibrary.requestPermissionsAsync(true, ['video']);
-      if (permission.status !== 'granted') {
-        throw new Error('Allow video access so Agriventure can save the slideshow to your gallery.');
+      if (Platform.OS !== 'android') {
+        await shareVideo();
+        return;
       }
 
       const cacheDirectory = FileSystem.cacheDirectory;
@@ -294,8 +293,24 @@ export default function SlidesScreen() {
         throw new Error(`Could not download the video (server returned ${result.status}).`);
       }
 
-      await MediaLibrary.createAssetAsync(result.uri);
-      Alert.alert('Video saved', 'Your slideshow was saved to your device gallery.');
+      const directory = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+      if (!directory.granted) return;
+
+      const fileData = await FileSystem.readAsStringAsync(result.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      const fileName = `Agriventure-Slideshow-${Date.now()}`;
+      const destinationUri = await FileSystem.StorageAccessFramework.createFileAsync(
+        directory.directoryUri,
+        fileName,
+        'video/mp4'
+      );
+      await FileSystem.StorageAccessFramework.writeAsStringAsync(
+        destinationUri,
+        fileData,
+        { encoding: FileSystem.EncodingType.Base64 }
+      );
+      Alert.alert('Video downloaded', `${fileName}.mp4 was saved to the folder you selected.`);
     } catch (error) {
       console.error('Slideshow save error:', error);
       Alert.alert(
